@@ -37,12 +37,16 @@ The asset declares `compute_kind="qwp"` (QuestDB Writer Protocol), so the
 Dagster UI attributes compute to the time-series database rather than the
 Python worker.
 
-| Port | Protocol | Purpose |
-|------|----------|---------|
-| 8812 | PostgreSQL wire | SQL clients (`psql`, DBeaver, …) |
-| 9000 | HTTP | REST API + Web Console (used by `QuestDbResource`) |
-| 9003 | HTTP | Min health server (container healthcheck) |
-| 9009 | TCP | InfluxDB line protocol |
+| Port | Protocol | Purpose | Exposed by default |
+|------|----------|---------|--------------------|
+| 8812 | PostgreSQL wire | SQL clients (`psql`, DBeaver, …) | No |
+| 9000 | HTTP | REST API + Web Console (used by `QuestDbResource`) | Yes — host port set by `QDB_PORT` (default `9000`) |
+| 9003 | HTTP | Min health server (container healthcheck) | No (container-internal) |
+| 9009 | TCP | InfluxDB line protocol | No |
+
+Only the REST API is published to the host. To expose another port,
+add a mapping under `ports` in `infra/databases/compose.yaml`
+(e.g. `"8812:8812"` for SQL clients).
 
 ## Prerequisites
 
@@ -98,7 +102,7 @@ All configuration is sourced from `.env` (auto-loaded by `just`):
 | `LATITUDE` | `0` | Telemetry coordinate — latitude (see `.env.sample`) |
 | `LONGITUDE` | `0` | Telemetry coordinate — longitude (see `.env.sample`) |
 | `QDB_HOST` | `localhost` | QuestDB host (Dagster resource) |
-| `QDB_PORT` | `9000` | QuestDB REST port (Dagster resource) |
+| `QDB_PORT` | `9000` | QuestDB REST port (container + resource) |
 | `QDB_PG_USER` | `admin` | QuestDB user (container + resource) |
 | `QDB_PG_PASSWORD` | `admin` | QuestDB password (container + resource) |
 | `QDB_TELEMETRY_ENABLED` | `false` | QuestDB anonymous telemetry |

@@ -14,10 +14,7 @@ services:
       - QDB_PG_READONLY_USER
       - QDB_PG_READONLY_PASSWORD
     ports:
-      - "8812:8812" # PostgreSQL wire protocol
-      - "9000:9000" # REST API & Web Console
-      - "9003:9003" # Min health server
-      - "9009:9009" # InfluxDB line protocol
+      - "${QDB_PORT}:9000" # REST API & Web Console
     networks:
       - default
     volumes:
