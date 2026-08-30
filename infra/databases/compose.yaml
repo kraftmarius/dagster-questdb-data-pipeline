@@ -18,7 +18,6 @@ services:
     networks:
       - default
     volumes:
-      - /etc/localtime:/etc/localtime:ro
       - questdb_data:/var/lib/questdb
     healthcheck:
       test:
