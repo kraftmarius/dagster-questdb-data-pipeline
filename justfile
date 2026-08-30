@@ -16,6 +16,10 @@ upgrade:
 run:
     @uv run dagster-questdb-boilerplate
 
+# Run dagster dev server
+dg-dev:
+    @uv run dagster dev
+
 # Run all quality checks
 lint:
     @uv run ruff check
@@ -27,7 +31,6 @@ fmt:
     @uv run ruff format
 
 # Automatically fix lint and format issues
-fix:
+fix: fmt
     @uv run ruff check --fix
     @uv run ty check --fix
-    @just fmt
