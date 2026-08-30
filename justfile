@@ -1,4 +1,8 @@
+mod infra
+
 set dotenv-load := true
+
+export COMPOSE_PROJECT_NAME := env_var_or_default('COMPOSE_PROJECT_NAME', 'dagster_questdb_boilerplate')
 
 # List recipes
 list:
@@ -12,13 +16,20 @@ init:
 upgrade:
     @uv lock --upgrade
 
-# Run project
-run:
-    @uv run dagster-questdb-boilerplate
+# Start the development environment
+dev:
+    #!/usr/bin/env bash
+    cleanup() {
+      just infra down --volumes || true
+    }
 
-# Run dagster dev server
-dg-dev:
-    @uv run dg dev
+    trap cleanup EXIT SIGINT SIGTERM
+
+    echo "=== Starting infrastructure... ==="
+    just infra up --wait
+
+    echo "=== Starting Dagster dev server... ==="
+    uv run dg dev
 
 # Run all quality checks
 lint:

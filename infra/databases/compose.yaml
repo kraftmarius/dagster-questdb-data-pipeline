@@ -1,0 +1,44 @@
+networks:
+  default:
+
+services:
+  questdb:
+    image: questdb/questdb:10.0.1
+    container_name: ${COMPOSE_PROJECT_NAME}_questdb
+    restart: no
+    environment:
+      - QDB_TELEMETRY_ENABLED
+      - QDB_PG_USER
+      - QDB_PG_PASSWORD
+      - QDB_PG_READONLY_USER_ENABLED
+      - QDB_PG_READONLY_USER
+      - QDB_PG_READONLY_PASSWORD
+    ports:
+      - "8812:8812" # PostgreSQL wire protocol
+      - "9000:9000" # REST API & Web Console
+      - "9003:9003" # Min health server
+      - "9009:9009" # InfluxDB line protocol
+    networks:
+      - default
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - questdb_data:/var/lib/questdb
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -v http://127.0.0.1:9003",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    logging:
+      driver: "local"
+      options:
+        max-size: "100m"
+        max-file: "3"
+
+volumes:
+  questdb_data:
+    driver: local

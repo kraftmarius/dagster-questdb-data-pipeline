@@ -14,10 +14,10 @@ dist/
 
 # Dagster
 .dg/
+.tmp_dagster*
 
 # Environment / secrets
-.env
-.env.*
+.env*
 !.env.sample
 
 # Testing / coverage
