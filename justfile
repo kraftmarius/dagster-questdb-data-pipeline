@@ -4,11 +4,11 @@ set dotenv-load := true
 list:
     @just --list --unsorted
 
-#Initialize project
+# Synchronize environment with lockfile
 init:
-    @uv sync
+    @uv sync --all-groups
 
-# Upgrade all packages
+# Upgrade all dependencies and update lockfile
 upgrade:
     @uv lock --upgrade
 
@@ -16,18 +16,18 @@ upgrade:
 run:
     @uv run dagster-questdb-boilerplate
 
-# Run all quality checks and fail on any warning
+# Run all quality checks
 lint:
-    @uvx ruff check
-    @uvx ruff format --check
-    @uvx ty check
+    @uv run ruff check
+    @uv run ruff format --check
+    @uv run ty check
 
-# Format code according to style guidelines
+# Format source code
 fmt:
-    @uvx ruff format
+    @uv run ruff format
 
-# Quick fix for formatting and linting issues
+# Automatically fix lint and format issues
 fix:
-    @uvx ruff check --fix
-    @uvx ty check --fix
+    @uv run ruff check --fix
+    @uv run ty check --fix
     @just fmt

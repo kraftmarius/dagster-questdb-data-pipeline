@@ -1,7 +1,7 @@
 [project]
 name = "dagster-questdb-boilerplate"
 version = "0.1.0"
-description = "Add your description here"
+description = "Dagster + QuestDB starter boilerplate"
 readme = "README.md"
 authors = [
     { name = "Marius Kraft", email = "kraft.marius@proton.me" }
@@ -22,3 +22,11 @@ dev = [
     "ruff>=0.16.5",
     "ty>=0.0.75",
 ]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["dagster_questdb_boilerplate"]
