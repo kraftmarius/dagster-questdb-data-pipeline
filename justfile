@@ -2,7 +2,7 @@ mod infra
 
 set dotenv-load := true
 
-export COMPOSE_PROJECT_NAME := env_var_or_default('COMPOSE_PROJECT_NAME', 'dagster_questdb_boilerplate')
+export COMPOSE_PROJECT_NAME := env_var_or_default('COMPOSE_PROJECT_NAME', 'dagster_questdb_data_pipeline')
 
 # List recipes
 list:

@@ -1,7 +1,7 @@
 import dagster as dg
 import pandas as pd
 
-from dagster_questdb_boilerplate.defs.resources import (
+from dagster_questdb_data_pipeline.defs.resources import (
     QuestDbResource,
     WeatherApiResource,
 )

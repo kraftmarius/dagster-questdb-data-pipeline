@@ -1,7 +1,7 @@
 [project]
-name = "dagster_questdb_boilerplate"
+name = "dagster_questdb_data_pipeline"
 version = "0.1.0"
-description = "Dagster + QuestDB starter boilerplate"
+description = "Dagster + QuestDB data pipeline"
 readme = "README.md"
 authors = [
     { name = "Marius Kraft", email = "kraft.marius@proton.me" }
@@ -15,9 +15,6 @@ dependencies = [
     "pydantic>=2.13.5",
     "questdb>=5.0.0",
 ]
-
-[project.scripts]
-dagster-questdb-boilerplate = "dagster_questdb_boilerplate:main"
 
 [build-system]
 requires = ["uv_build>=0.12.7,<0.13.0"]
@@ -37,15 +34,15 @@ line-length = 100
 src = ["src", "tests"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["dagster_questdb_boilerplate"]
+known-first-party = ["dagster_questdb_data_pipeline"]
 
 [tool.dg]
 directory_type = "project"
 
 [tool.dg.project]
-root_module = "dagster_questdb_boilerplate"
+root_module = "dagster_questdb_data_pipeline"
 registry_modules = [
-    "dagster_questdb_boilerplate.components.*",
+    "dagster_questdb_data_pipeline.components.*",
 ]
 
 

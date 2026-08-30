@@ -1,6 +1,6 @@
-# dagster-questdb-boilerplate
+# dagster-questdb-data-pipeline
 
-Starter boilerplate for building time-series data pipelines with
+Time-series data pipeline template built with
 [Dagster](https://dagster.io) and [QuestDB](https://questdb.com).
 
 Out of the box it ingests hourly weather telemetry from the
@@ -98,7 +98,7 @@ All configuration is sourced from `.env` (auto-loaded by `just`):
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `COMPOSE_PROJECT_NAME` | `dagster_questdb_boilerplate` | Prefix for Docker networks/volumes |
+| `COMPOSE_PROJECT_NAME` | `dagster_questdb_data_pipeline` | Prefix for Docker networks/volumes |
 | `LATITUDE` | `0` | Telemetry coordinate — latitude (see `.env.sample`) |
 | `LONGITUDE` | `0` | Telemetry coordinate — longitude (see `.env.sample`) |
 | `QDB_HOST` | `localhost` | QuestDB host (Dagster resource) |
@@ -119,7 +119,7 @@ Defaults are local-dev only. Change all credentials before any non-local use.
 │   ├── compose.yaml                # Root compose (includes databases)
 │   └── databases/
 │       └── compose.yaml            # QuestDB 10.0.1
-├── src/dagster_questdb_boilerplate/
+├── src/dagster_questdb_data_pipeline/
 │   ├── definitions.py              # @definitions entry point (defs/ auto-discovery)
 │   └── defs/
 │       ├── assets.py               # weather_telemetry_raw (daily partitions)
@@ -166,4 +166,56 @@ CI-friendly quality gates, all enforced by `just lint`:
 - **New infrastructure:** add a compose file under `infra/*` and include it
   from `infra/compose.yaml`
 - **Workspace expansion:** the `dg` registry is pre-wired for
-  `dagster_questdb_boilerplate.components.*`
+  `dagster_questdb_data_pipeline.components.*`
+
+## Renaming the project
+
+This is a template — rename it to your product. The name exists in **two forms** that must stay consistent:
+
+- **Module** (snake_case) — `dagster_questdb_data_pipeline`: Python package, `root_module`, ruff `known-first-party`, `registry_modules`, `[project] name`, and `COMPOSE_PROJECT_NAME`.
+- **Distribution** (kebab-case) — `dagster-questdb-data-pipeline`: the README title and the root package name in `uv.lock`.
+
+### Rename checklist
+
+| Location | Current value |
+|----------|---------------|
+| `pyproject.toml` → `[project] name` | `dagster_questdb_data_pipeline` |
+| `pyproject.toml` → `[tool.ruff.lint.isort] known-first-party` | `["dagster_questdb_data_pipeline"]` |
+| `pyproject.toml` → `[tool.dg.project] root_module` | `dagster_questdb_data_pipeline` |
+| `pyproject.toml` → `[tool.dg.project] registry_modules` | `dagster_questdb_data_pipeline.components.*` |
+| `src/<module>/` | `src/dagster_questdb_data_pipeline/` |
+| `src/<module>/defs/assets.py` | `from dagster_questdb_data_pipeline.defs.resources import …` |
+| `justfile` → `COMPOSE_PROJECT_NAME` default | `dagster_questdb_data_pipeline` |
+| `.env` / `.env.sample` → `COMPOSE_PROJECT_NAME` | `dagster_questdb_data_pipeline` |
+| `README.md` | title, config table, layout tree |
+
+`uv.lock` (root `[[package]] name`) **regenerates** on the next sync — do not hand-edit.
+
+### Procedure
+
+```bash
+# 1. Rename the project directory itself (run from the parent directory)
+mv dagster-questdb-data-pipeline <new_project_dir>
+cd <new_project_dir>
+
+# 2. Rename the package directory
+git mv src/dagster_questdb_data_pipeline src/<new_module_name>
+
+# 3. Replace every name reference (a repo-wide search/replace of the two forms
+#    above covers pyproject.toml, assets.py, justfile, .env.sample, README.md)
+
+# 4. Regenerate the lockfile and venv — MUST run last, at the final path
+rm -rf .venv
+just init
+```
+
+### Why you must delete `.venv`
+
+uv writes Python **console scripts** (`dg`, `dagster`, `dagster-webserver`, and your CLI command) as text files with a **hardcoded absolute shebang** to the venv interpreter. Renaming the project directory orphans that path, so the scripts fail to spawn:
+
+```
+error: Failed to spawn: `dg`
+  Caused by: No such file or directory (os error 2)
+```
+
+`uv sync` will not repair this — the installed packages are still valid, only the path moved. Deleting `.venv` and re-syncing regenerates every shebang, **but it must run at the final directory path** (after step 1); syncing earlier just bakes the stale path back in.
