@@ -1,0 +1,37 @@
+# Python artifacts
+__pycache__/
+.ruff_cache/
+*.py[cod]
+*$py.class
+build/
+dist/
+
+# Virtual environment
+.venv/
+
+# uv (lockfile IS tracked — do not ignore)
+# .python-version IS tracked — do not ignore
+
+# Dagster
+.dg/
+
+# Environment / secrets
+.env
+.env.*
+!.env.sample
+
+# Testing / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
