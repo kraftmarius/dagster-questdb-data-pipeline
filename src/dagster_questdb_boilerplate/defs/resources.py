@@ -3,6 +3,8 @@ from typing import Any
 
 import dagster as dg
 import httpx2
+import pandas as pd
+import questdb as qdb
 from pydantic import Field
 
 
@@ -60,6 +62,46 @@ class WeatherApiResource(dg.ConfigurableResource):
             return response.json()
 
 
+class QuestDbResource(dg.ConfigurableResource):
+    """Resource for interacting with QuestDB."""
+
+    host: str = Field(
+        default="localhost",
+        description="Hostname of the QuestDB server.",
+    )
+    port: int = Field(
+        default=9000,
+        description="Port of the QuestDB server.",
+    )
+    username: str = Field(
+        description="Username for connecting to QuestDB.",
+    )
+    password: str = Field(
+        description="Password for connecting to QuestDB.",
+    )
+
+    def connect(self) -> qdb.QuestDB:
+        """Connect to QuestDB."""
+
+        return qdb.connect(
+            host=self.host,
+            port=self.port,
+            username=self.username,
+            password=self.password,
+        )
+
+    def ingest_dataframe(self, table_name: str, df: pd.DataFrame) -> int:
+        """Ingest records into a QuestDB table via pandas DataFrame."""
+
+        if df.empty:
+            return 0
+
+        with self.connect() as questdb, questdb.sender() as sender:
+            sender.dataframe(df, table_name=table_name, at="timestamp")
+
+        return len(df)
+
+
 @dg.definitions
 def resources():
     return dg.Definitions(
@@ -67,6 +109,12 @@ def resources():
             "weather_api": WeatherApiResource(
                 default_latitude=dg.EnvVar("LATITUDE").get_value(),
                 default_longitude=dg.EnvVar("LONGITUDE").get_value(),
-            )
+            ),
+            "questdb": QuestDbResource(
+                host=dg.EnvVar("QDB_HOST").get_value(),
+                port=dg.EnvVar().int("QDB_PORT"),
+                username=dg.EnvVar("QDB_PG_USER").get_value(),
+                password=dg.EnvVar("QDB_PG_PASSWORD").get_value(),
+            ),
         },
     )

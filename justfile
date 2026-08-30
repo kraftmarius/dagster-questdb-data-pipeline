@@ -16,7 +16,7 @@ init:
 upgrade:
     @uv lock --upgrade
 
-# Start the development environment
+# Start the development environment (data not persisted)
 dev:
     #!/usr/bin/env bash
     cleanup() {
