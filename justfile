@@ -20,6 +20,7 @@ run:
 lint:
     @uvx ruff check
     @uvx ruff format --check
+    @uvx ty check
 
 # Format code according to style guidelines
 fmt:
@@ -28,4 +29,5 @@ fmt:
 # Quick fix for formatting and linting issues
 fix:
     @uvx ruff check --fix
+    @uvx ty check --fix
     @just fmt
