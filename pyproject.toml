@@ -1,5 +1,5 @@
 [project]
-name = "dagster-questdb-boilerplate"
+name = "dagster_questdb_boilerplate"
 version = "0.1.0"
 description = "Dagster + QuestDB starter boilerplate"
 readme = "README.md"
