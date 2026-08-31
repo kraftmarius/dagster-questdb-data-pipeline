@@ -5,7 +5,7 @@ import dagster as dg
 import httpx2
 from pydantic import Field
 
-from dagster_questdb_data_pipeline.models.weather import OpenMeteoResponse
+from dagster_questdb_data_pipeline.models.weather import HourlyWeatherData, OpenMeteoResponse
 
 
 class WeatherApiResource(dg.ConfigurableResource):
@@ -39,12 +39,7 @@ class WeatherApiResource(dg.ConfigurableResource):
         lat = latitude if latitude is not None else self.default_latitude
         lon = longitude if longitude is not None else self.default_longitude
 
-        selected_metrics = metrics or [
-            "temperature_2m",
-            "relative_humidity_2m",
-            "pressure_msl",
-            "wind_speed_10m",
-        ]
+        selected_metrics = metrics or HourlyWeatherData.metric_names()
 
         params: dict[str, Any] = {
             "latitude": lat,

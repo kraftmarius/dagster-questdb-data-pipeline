@@ -1,7 +1,25 @@
+from dataclasses import dataclass
 from typing import Self
 
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+@dataclass(frozen=True)
+class MetricBound:
+    """Valid range based on WMO standards."""
+
+    min_value: float
+    max_value: float
+    unit: str
+
+
+WMO_BOUNDS = {
+    "temperature_2m": MetricBound(min_value=-95.0, max_value=65.0, unit="°C"),
+    "relative_humidity_2m": MetricBound(min_value=0.0, max_value=100.0, unit="%"),
+    "pressure_msl": MetricBound(min_value=850.0, max_value=1100.0, unit="hPa"),
+    "wind_speed_10m": MetricBound(min_value=0.0, max_value=500.0, unit="km/h"),
+}
 
 
 class HourlyWeatherData(BaseModel):
@@ -11,40 +29,30 @@ class HourlyWeatherData(BaseModel):
     pressure_msl: list[float] = Field(description="Atmospheric pressure at sea level in hPa.")
     wind_speed_10m: list[float] = Field(description="Wind speed in km/h.")
 
+    @classmethod
+    def metric_names(cls) -> list[str]:
+        """Return all weather metric column names excluding timestamp."""
+        return [field for field in cls.model_fields if field != "time"]
+
     @model_validator(mode="after")
     def validate_column_lengths_and_ranges(self) -> Self:
         expected_len = len(self.time)
 
-        for field_name in (
-            "temperature_2m",
-            "relative_humidity_2m",
-            "pressure_msl",
-            "wind_speed_10m",
-        ):
-            actual_len = len(getattr(self, field_name))
-
-            if actual_len != expected_len:
+        for metric in self.metric_names():
+            values = getattr(self, metric)
+            if len(values) != expected_len:
                 raise ValueError(
-                    f"Column '{field_name}' length ({actual_len}) does not match expected length ({expected_len})."
+                    f"Column '{metric}' length ({len(values)}) does not match expected length ({expected_len})."
                 )
 
-        # Validation thresholds are derived from the World Meteorological Organization (WMO)
-        # World Weather & Climate Extremes Archive (https://wmo.int/files/records-of-weather-and-climate-extremes-table)
-        for temp in self.temperature_2m:
-            if not (-95.0 <= temp <= 65.0):
-                raise ValueError(f"Temperature out of bounds [-95, +65] °C: {temp}")
-
-        for humidity in self.relative_humidity_2m:
-            if not (0.0 <= humidity <= 100.0):
-                raise ValueError(f"Relative humidity out of bounds [0, 100] %: {humidity}")
-
-        for pressure in self.pressure_msl:
-            if not (850.0 <= pressure <= 1100.0):
-                raise ValueError(f"Sea level pressure out of bounds [850, 1100] hPa: {pressure}")
-
-        for wind in self.wind_speed_10m:
-            if not (0.0 <= wind <= 500.0):
-                raise ValueError(f"Wind speed out of bounds [0, 500] km/h: {wind}")
+            bounds = WMO_BOUNDS.get(metric)
+            if bounds:
+                for val in values:
+                    if not (bounds.min_value <= val <= bounds.max_value):
+                        raise ValueError(
+                            f"Metric '{metric}' value {val} violates WMO bounds "
+                            f"[{bounds.min_value}, {bounds.max_value}] {bounds.unit}."
+                        )
 
         return self
 

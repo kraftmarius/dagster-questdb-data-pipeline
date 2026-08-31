@@ -88,13 +88,25 @@ is not persisted across runs by design.
 
 In the Dagster UI, select the `weather_raw` asset, pick a partition, and
 materialize. Run metadata includes `table`, `row_count`, and `target_date`.
-A blocking `weather_raw_integrity_check` runs automatically after ingestion,
+A blocking `integrity_check` runs automatically after ingestion,
 validating row count (24) and WMO metric bounds. Verify the table via the
 QuestDB console:
 
 ```sql
 SELECT * FROM weather_raw ORDER BY timestamp DESC LIMIT 42;
 ```
+
+### WMO Validation Thresholds
+
+Validation thresholds are derived from the [World Meteorological Organization (WMO)
+World Weather & Climate Extremes Archive](https://wmo.int/files/records-of-weather-and-climate-extremes-table):
+
+| Metric | Bounds | Reference Record |
+|--------|--------|------------------|
+| Temperature | [-95.0, +65.0] °C | -89.2 °C (Vostok), +56.7 °C (Death Valley) |
+| Sea Level Pressure | [850.0, 1100.0] hPa | 870.0 hPa (Typhoon Tip), 1084.8 hPa (Tosontsengel) |
+| Wind Speed | [0.0, 500.0] km/h | 408 km/h non-tornadic gust (Barrow Island) |
+| Relative Humidity | [0.0, 100.0] % | Thermodynamic physical limits |
 
 ## Configuration
 
@@ -132,7 +144,7 @@ Defaults are local-dev only. Change all credentials before any non-local use.
 │   │       ├── weather_api.py      # WeatherApiResource
 │   │       └── questdb.py          # QuestDbResource
 │   └── models/
-│       └── weather.py              # Pydantic models (OpenMeteoResponse, HourlyWeatherData)
+│       └── weather.py              # Pydantic models, WMO_BOUNDS registry (single source of truth for validation)
 ├── tests/
 ├── justfile
 ├── pyproject.toml
@@ -211,7 +223,7 @@ cd <new_project_dir>
 git mv src/dagster_questdb_data_pipeline src/<new_module_name>
 
 # 3. Replace every name reference (a repo-wide search/replace of the two forms
-#    above covers pyproject.toml, assets.py, justfile, .env.sample, README.md)
+#    above covers pyproject.toml, defs/, justfile, .env.sample, README.md)
 
 # 4. Regenerate the lockfile and venv — MUST run last, at the final path
 rm -rf .venv
