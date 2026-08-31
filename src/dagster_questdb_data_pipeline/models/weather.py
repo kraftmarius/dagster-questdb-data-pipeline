@@ -7,13 +7,14 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 @dataclass(frozen=True)
 class MetricBound:
-    """Valid range based on WMO standards."""
+    """Physically plausible range for a weather metric, derived from WMO world records."""
 
     min_value: float
     max_value: float
     unit: str
 
 
+# WMO-derived validation thresholds (single source of truth).
 WMO_BOUNDS = {
     "temperature_2m": MetricBound(min_value=-95.0, max_value=65.0, unit="°C"),
     "relative_humidity_2m": MetricBound(min_value=0.0, max_value=100.0, unit="%"),
@@ -23,6 +24,8 @@ WMO_BOUNDS = {
 
 
 class HourlyWeatherData(BaseModel):
+    """Hourly weather metrics from the Open-Meteo Archive API."""
+
     time: list[str] = Field(description="ISO-8601 timestamps (UTC).")
     temperature_2m: list[float] = Field(description="Air temperature in Celsius.")
     relative_humidity_2m: list[float] = Field(description="Relative humidity in percent.")
@@ -36,6 +39,7 @@ class HourlyWeatherData(BaseModel):
 
     @model_validator(mode="after")
     def validate_column_lengths_and_ranges(self) -> Self:
+        """Enforce column length consistency and WMO range bounds on all metrics."""
         expected_len = len(self.time)
 
         for metric in self.metric_names():
@@ -57,6 +61,7 @@ class HourlyWeatherData(BaseModel):
         return self
 
     def to_dataframe(self) -> pd.DataFrame:
+        """Convert to a pandas DataFrame, renaming `time` to `timestamp` (UTC)."""
         df = pd.DataFrame(self.model_dump())
         df["timestamp"] = pd.to_datetime(df.pop("time"), utc=True)
 
@@ -64,6 +69,8 @@ class HourlyWeatherData(BaseModel):
 
 
 class OpenMeteoResponse(BaseModel):
+    """Top-level response from the Open-Meteo Archive API."""
+
     model_config = ConfigDict(extra="ignore")
 
     latitude: float

@@ -22,13 +22,8 @@ def raw(
 ) -> dg.Output[None]:
     target_date = context.partition_time_window.start.date()
 
-    # Fetch raw weather data from Open-Meteo
     response = weather_api.fetch_hourly(start_date=target_date, end_date=target_date)
-
-    # Convert data to Pandas DataFrame
     df = response.hourly.to_dataframe()
-
-    # Ingest data into QuestDB
     row_count = questdb.ingest_dataframe(WEATHER_RAW_TABLE, df)
 
     return dg.Output(
@@ -51,13 +46,6 @@ def raw_integrity_check(
     context: dg.AssetCheckExecutionContext,
     questdb: QuestDbResource,
 ) -> dg.AssetCheckResult:
-    """Validate persisted hourly weather records in QuestDB.
-
-    :param context: Execution context containing partition time window.
-    :param questdb: QuestDB resource client.
-    :return: AssetCheckResult indicating verification status and quality metrics.
-    """
-
     target_date = context.partition_time_window.start.date()
 
     # Dynamically compose SQL aggregations strictly from immutable domain whitelist
@@ -105,12 +93,10 @@ def raw_integrity_check(
         actual_min = float(row[min_col])
         actual_max = float(row[max_col])
 
-        # Add metric range to metadata catalog
         metadata_ranges[f"{metric}_range"] = dg.MetadataValue.text(
             f"[{actual_min:.1f}, {actual_max:.1f}] {bounds.unit}"
         )
 
-        # Check boundary violations
         if actual_min < bounds.min_value or actual_max > bounds.max_value:
             violations.append(
                 f"Metric '{metric}' violates WMO limits [{bounds.min_value}, {bounds.max_value}] {bounds.unit}: "

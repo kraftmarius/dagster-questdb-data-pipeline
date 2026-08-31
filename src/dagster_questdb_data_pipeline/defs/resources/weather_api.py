@@ -34,8 +34,6 @@ class WeatherApiResource(dg.ConfigurableResource):
         longitude: float | None = None,
         metrics: list[str] | None = None,
     ) -> OpenMeteoResponse:
-        """Fetch hourly time-series data for a defined time window."""
-
         lat = latitude if latitude is not None else self.default_latitude
         lon = longitude if longitude is not None else self.default_longitude
 

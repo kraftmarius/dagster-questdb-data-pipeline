@@ -23,8 +23,6 @@ class QuestDbResource(dg.ConfigurableResource):
     )
 
     def connect(self) -> qdb.QuestDB:
-        """Connect to QuestDB."""
-
         return qdb.connect(
             host=self.host,
             port=self.port,
@@ -33,8 +31,6 @@ class QuestDbResource(dg.ConfigurableResource):
         )
 
     def ingest_dataframe(self, table_name: str, df: pd.DataFrame) -> int:
-        """Ingest records into a QuestDB table via pandas DataFrame."""
-
         if df.empty:
             return 0
 
