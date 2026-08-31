@@ -27,15 +27,14 @@ into QuestDB through a daily-partitioned Dagster asset — a complete
 ## Architecture
 
 ```
-┌─────────────────────┐      ┌───────────────────────────────┐      ┌──────────────┐
-│  Open-Meteo Archive │ ───► │  weather_telemetry_raw        │ ───► │    QuestDB   │
-│  API (hourly data)  │      │  @dg.asset · daily partitions │      │  (REST :9000)│
-└─────────────────────┘      └───────────────────────────────┘      └──────────────┘
+┌──────────────────────┐      ┌───────────────────────────────┐      ┌────────────────┐
+│  Open-Meteo Archive  │ ───► │          weather_raw          │ ───► │     QuestDB    │
+│   API (hourly data)  │      │  @dg.asset · daily partitions │      │  (REST :9000)  │
+└──────────────────────┘      └───────────────────────────────┘      └────────────────┘
 ```
 
-The asset declares `compute_kind="qwp"` (QuestDB Writer Protocol), so the
-Dagster UI attributes compute to the time-series database rather than the
-Python worker.
+The asset declares `kinds={"questdb"}`, so the Dagster UI attributes compute
+to the time-series database rather than the Python worker.
 
 | Port | Protocol | Purpose | Exposed by default |
 |------|----------|---------|--------------------|
@@ -83,13 +82,13 @@ is not persisted across runs by design.
 
 ### Running the sample pipeline
 
-In the Dagster UI, select the `weather_telemetry_raw` asset (group
-`telemetry_ingest`), pick a partition, and materialize. Run metadata includes
-`record_count`, `ingested_count`, `target_date`, and a Markdown data preview.
-Verify the table via the QuestDB console:
+In the Dagster UI, select the `weather_raw` asset, pick a partition, and
+materialize. Run metadata includes `record_count`, `ingested_count`,
+`target_date`, and a Markdown data preview. Verify the table via the QuestDB
+console:
 
 ```sql
-SELECT * FROM weather_telemetry_raw ORDER BY timestamp DESC LIMIT 42;
+SELECT * FROM weather_raw ORDER BY timestamp DESC LIMIT 42;
 ```
 
 ## Configuration
@@ -122,8 +121,11 @@ Defaults are local-dev only. Change all credentials before any non-local use.
 ├── src/dagster_questdb_data_pipeline/
 │   ├── definitions.py              # @definitions entry point (defs/ auto-discovery)
 │   └── defs/
-│       ├── assets.py               # weather_telemetry_raw (daily partitions)
-│       └── resources.py            # WeatherApiResource, QuestDbResource
+│       ├── assets/
+│       │   └── weather_raw.py      # weather_raw (daily partitions)
+│       └── resources/
+│           ├── weather_api.py      # WeatherApiResource
+│           └── questdb.py          # QuestDbResource
 ├── tests/
 ├── justfile
 ├── pyproject.toml
@@ -184,7 +186,7 @@ This is a template — rename it to your product. The name exists in **two forms
 | `pyproject.toml` → `[tool.dg.project] root_module` | `dagster_questdb_data_pipeline` |
 | `pyproject.toml` → `[tool.dg.project] registry_modules` | `dagster_questdb_data_pipeline.components.*` |
 | `src/<module>/` | `src/dagster_questdb_data_pipeline/` |
-| `src/<module>/defs/assets.py` | `from dagster_questdb_data_pipeline.defs.resources import …` |
+| `src/<module>/defs/assets/weather_raw.py` | `from dagster_questdb_data_pipeline.defs.resources.questdb import …` |
 | `justfile` → `COMPOSE_PROJECT_NAME` default | `dagster_questdb_data_pipeline` |
 | `.env` / `.env.sample` → `COMPOSE_PROJECT_NAME` | `dagster_questdb_data_pipeline` |
 | `README.md` | title, config table, layout tree |
