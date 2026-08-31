@@ -5,6 +5,7 @@ import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 WEATHER_RAW_TABLE: Final[str] = "weather_raw"
+WEATHER_DAILY_ROLLUP_TABLE: Final[str] = "weather_daily_rollup"
 
 
 @dataclass(frozen=True)
@@ -25,6 +26,28 @@ WMO_BOUNDS = {
 }
 
 
+@dataclass(frozen=True)
+class RollupProjection:
+    """Specification of an in-engine SQL rollup projection."""
+
+    expression: str
+    alias: str
+    unit: str
+
+
+ROLLUP_PROJECTIONS: Final[tuple[RollupProjection, ...]] = (
+    RollupProjection("avg(temperature_2m)", "avg_temperature_2m", "°C"),
+    RollupProjection("min(temperature_2m)", "min_temperature_2m", "°C"),
+    RollupProjection("max(temperature_2m)", "max_temperature_2m", "°C"),
+    RollupProjection(
+        "(max(temperature_2m) - min(temperature_2m))", "diurnal_temperature_range", "°C"
+    ),
+    RollupProjection("avg(relative_humidity_2m)", "avg_relative_humidity_2m", "%"),
+    RollupProjection("avg(pressure_msl)", "avg_pressure_msl", "hPa"),
+    RollupProjection("max(wind_speed_10m)", "max_wind_speed_10m", "km/h"),
+)
+
+
 class HourlyWeatherData(BaseModel):
     """Hourly weather metrics from the Open-Meteo Archive API."""
 
@@ -37,6 +60,7 @@ class HourlyWeatherData(BaseModel):
     @classmethod
     def metric_names(cls) -> list[str]:
         """Return all weather metric column names excluding timestamp."""
+
         return [field for field in cls.model_fields if field != "time"]
 
     @model_validator(mode="after")

@@ -30,8 +30,8 @@ def raw(
         value=None,
         metadata={
             "table": dg.MetadataValue.text(WEATHER_RAW_TABLE),
-            "row_count": dg.MetadataValue.int(row_count),
             "target_date": dg.MetadataValue.text(target_date.isoformat()),
+            "dagster/row_count": dg.MetadataValue.int(row_count),
         },
     )
 
@@ -48,7 +48,7 @@ def raw_integrity_check(
 ) -> dg.AssetCheckResult:
     target_date = context.partition_time_window.start.date()
 
-    # Dynamically compose SQL aggregations strictly from immutable domain whitelist
+    # Dynamically compose SQL aggregations strictly from immutable domain model
     metric_aggregations = ",\n            ".join(
         f"min({m}) as min_{m}, max({m}) as max_{m}" for m in WMO_BOUNDS
     )
@@ -78,9 +78,9 @@ def raw_integrity_check(
     row_count = int(row["row_count"])
 
     violations: list[str] = []
-    metadata_ranges: dict[str, dg.MetadataValue] = {
+    metadata: dict[str, dg.MetadataValue] = {
         "target_date": dg.MetadataValue.text(target_date.isoformat()),
-        "row_count": dg.MetadataValue.int(row_count),
+        "dagster/row_count": dg.MetadataValue.int(row_count),
     }
 
     if row_count != 24:
@@ -93,7 +93,7 @@ def raw_integrity_check(
         actual_min = float(row[min_col])
         actual_max = float(row[max_col])
 
-        metadata_ranges[f"{metric}_range"] = dg.MetadataValue.text(
+        metadata[f"{metric}_range"] = dg.MetadataValue.text(
             f"[{actual_min:.1f}, {actual_max:.1f}] {bounds.unit}"
         )
 
@@ -104,11 +104,11 @@ def raw_integrity_check(
             )
 
     passed = len(violations) == 0
-    metadata_ranges["violations"] = (
+    metadata["violations"] = (
         dg.MetadataValue.json(violations) if violations else dg.MetadataValue.text("None")
     )
 
     return dg.AssetCheckResult(
         passed=passed,
-        metadata=metadata_ranges,
+        metadata=metadata,
     )

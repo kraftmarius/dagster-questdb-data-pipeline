@@ -5,8 +5,9 @@ Time-series data pipeline template built with
 
 Out of the box it ingests hourly weather telemetry from the
 [Open-Meteo Archive API](https://open-meteo.com/en/docs/historical-weather-api)
-into QuestDB through a daily-partitioned Dagster asset — a complete
-**API → asset → time-series database** flow ready to be repurposed.
+into QuestDB and computes in-engine daily rollups — a complete
+**API → raw asset → rollup asset → time-series database** flow ready
+to be repurposed.
 
 ## What's inside
 
@@ -20,26 +21,30 @@ into QuestDB through a daily-partitioned Dagster asset — a complete
     high-throughput DataFrame ingestion via the official Python client
 - **Schema provisioning** — packaged DDL applied via `just db-init` (auto-run
   by `just dev`); idempotent `CREATE TABLE IF NOT EXISTS`
-- **Daily partitions** on the sample asset for backfillable, idempotent runs
+- **Daily partitions** on all assets for backfillable, idempotent runs
 - **Env-driven configuration** — no secrets in code; everything is sourced
   from `.env`
 - **`just` task runner** — one command to boot the full dev environment
 - **Typed API responses** — Pydantic models with WMO-based range validation
   (temperature, humidity, pressure, wind speed) fail fast on out-of-bounds data
-- **Data integrity check** — a blocking `asset_check` verifies row count and
-  metric bounds in QuestDB after each ingestion
+- **In-engine daily rollup** — `SAMPLE BY 1d ALIGN TO CALENDAR` aggregates
+  24 hourly rows into daily statistics directly in QuestDB (no Python
+  compute), driven by a typed `ROLLUP_PROJECTIONS` domain model
+- **Data integrity checks** — blocking `asset_check` on each asset verifies
+  row count, metric bounds, and mathematical consistency (min ≤ avg ≤ max)
 - **Quality gates**: `ruff` (lint + format), `ty` (type check), `dg check defs`
 
 ## Architecture
 
 ```
-┌──────────────────────┐      ┌───────────────────────────────┐      ┌────────────────┐
-│  Open-Meteo Archive  │ ───► │          weather_raw          │ ───► │     QuestDB    │
-│   API (hourly data)  │      │  @dg.asset · daily partitions │      │  (REST :9000)  │
-└──────────────────────┘      └───────────────────────────────┘      └────────────────┘
+┌──────────────────────┐      ┌───────────────────────────────┐      ┌──────────────────────────────┐      ┌────────────────┐
+│  Open-Meteo Archive  │ ───► │          weather_raw          │ ───► │      weather_daily_rollup    │ ───► │     QuestDB    │
+│   API (hourly data)  │      │  @dg.asset · daily partitions │      │  @dg.asset · in-engine SQL   │      │  (REST :9000)  │
+└──────────────────────┘      └───────────────────────────────┘      └──────────────────────────────┘      └────────────────┘
 ```
 
-The asset declares `kinds={"questdb"}`, so the Dagster UI attributes compute
+Both assets declare `kinds={"questdb", "sql"}` (rollup) or
+`kinds={"questdb"}` (raw), so the Dagster UI attributes compute
 to the time-series database rather than the Python worker.
 
 | Port | Protocol | Purpose | Exposed by default |
@@ -88,14 +93,16 @@ containers on exit** (Ctrl-C). Data is not persisted across runs by design.
 
 ### Running the sample pipeline
 
-In the Dagster UI, select the `weather_raw` asset, pick a partition, and
-materialize. Run metadata includes `table`, `row_count`, and `target_date`.
-A blocking `integrity_check` runs automatically after ingestion,
-validating row count (24) and WMO metric bounds. Verify the table via the
-QuestDB console:
+In the Dagster UI, select an asset (`weather_raw` or `weather_daily_rollup`),
+pick a partition, and materialize. Each asset has a blocking
+`integrity_check`: the raw check validates row count (24) and WMO metric
+bounds; the rollup check validates mathematical consistency
+(min ≤ avg ≤ max, diurnal range) and WMO bounds. Verify the tables via
+the QuestDB console:
 
 ```sql
 SELECT * FROM weather_raw ORDER BY timestamp DESC LIMIT 42;
+SELECT * FROM weather_daily_rollup ORDER BY timestamp DESC LIMIT 30;
 ```
 
 ### WMO Validation Thresholds
@@ -141,16 +148,19 @@ Defaults are local-dev only. Change all credentials before any non-local use.
 │   ├── definitions.py              # @definitions entry point (defs/ auto-discovery)
 │   ├── defs/
 │   │   ├── assets/
-│   │   │   └── weather_raw.py      # weather_raw asset + integrity check
+│   │   │   └── weather/
+│   │   │       ├── raw.py              # weather_raw asset + integrity check
+│   │   │       └── daily_rollup.py     # weather_daily_rollup asset + integrity check
 │   │   └── resources/
 │   │       ├── weather_api.py      # WeatherApiResource
 │   │       └── questdb.py          # QuestDbResource
 │   ├── models/
-│   │   └── weather.py              # Pydantic models, WMO_BOUNDS registry, WEATHER_RAW_TABLE constant
+│   │   └── weather.py              # Pydantic models, WMO_BOUNDS, ROLLUP_PROJECTIONS, table constants
 │   └── schema/
 │       ├── __main__.py             # CLI entrypoint (`python -m …schema`)
 │       └── ddl/
-│           └── weather_raw.sql     # QuestDB DDL (partitioned, WAL, dedup upsert)
+│           ├── weather_raw.sql             # QuestDB DDL (hourly, partitioned, WAL, dedup)
+│           └── weather_daily_rollup.sql    # QuestDB DDL (daily, partitioned, WAL, dedup)
 ├── tests/
 ├── justfile
 ├── pyproject.toml
@@ -212,7 +222,7 @@ This is a template — rename it to your product. The name exists in **two forms
 | `pyproject.toml` → `[tool.dg.project] root_module` | `dagster_questdb_data_pipeline` |
 | `pyproject.toml` → `[tool.dg.project] registry_modules` | `dagster_questdb_data_pipeline.components.*` |
 | `src/<module>/` | `src/dagster_questdb_data_pipeline/` |
-| `src/<module>/defs/assets/weather_raw.py` | `from dagster_questdb_data_pipeline.defs.resources.questdb import …` |
+| `src/<module>/defs/assets/weather/raw.py` | `from dagster_questdb_data_pipeline.defs.resources.questdb import …` |
 | `justfile` → `COMPOSE_PROJECT_NAME` default | `dagster_questdb_data_pipeline` |
 | `.env` / `.env.sample` → `COMPOSE_PROJECT_NAME` | `dagster_questdb_data_pipeline` |
 | `README.md` | title, config table, layout tree |
