@@ -208,44 +208,10 @@ CI-friendly quality gates, all enforced by `just lint`:
 
 ## Renaming the project
 
-This is a template — rename it to your product. The name exists in **two forms** that must stay consistent:
+This is a template — rename it to your project and run `rm -rf .venv && just init`. The name appears in **two forms** that must stay consistent:
 
-- **Module** (snake_case) — `dagster_questdb_data_pipeline`: Python package, `root_module`, ruff `known-first-party`, `registry_modules`, `[project] name`, and `COMPOSE_PROJECT_NAME`.
-- **Distribution** (kebab-case) — `dagster-questdb-data-pipeline`: the README title and the root package name in `uv.lock`.
-
-### Rename checklist
-
-| Location | Current value |
-|----------|---------------|
-| `pyproject.toml` → `[project] name` | `dagster_questdb_data_pipeline` |
-| `pyproject.toml` → `[tool.ruff.lint.isort] known-first-party` | `["dagster_questdb_data_pipeline"]` |
-| `pyproject.toml` → `[tool.dg.project] root_module` | `dagster_questdb_data_pipeline` |
-| `pyproject.toml` → `[tool.dg.project] registry_modules` | `dagster_questdb_data_pipeline.components.*` |
-| `src/<module>/` | `src/dagster_questdb_data_pipeline/` |
-| `src/<module>/defs/assets/weather/raw.py` | `from dagster_questdb_data_pipeline.defs.resources.questdb import …` |
-| `justfile` → `COMPOSE_PROJECT_NAME` default | `dagster_questdb_data_pipeline` |
-| `.env` / `.env.sample` → `COMPOSE_PROJECT_NAME` | `dagster_questdb_data_pipeline` |
-| `README.md` | title, config table, layout tree |
-
-`uv.lock` (root `[[package]] name`) **regenerates** on the next sync — do not hand-edit.
-
-### Procedure
-
-```bash
-# 1. Rename the project directory itself (run from the parent directory)
-mv dagster-questdb-data-pipeline <new_project_dir>
-cd <new_project_dir>
-
-# 2. Rename the package directory
-git mv src/dagster_questdb_data_pipeline src/<new_module_name>
-
-# 3. Replace every name reference (a repo-wide search/replace of the two forms
-#    above covers pyproject.toml, defs/, justfile, .env.sample, README.md)
-
-# 4. Regenerate the lockfile and venv — MUST run last, at the final path
-rm -rf .venv
-just init
-```
+- **Module** (snake_case) — `dagster_questdb_data_pipeline`: the Python package name used for imports, `root_module`, and `COMPOSE_PROJECT_NAME`.
+- **Distribution** (kebab-case) — `dagster-questdb-data-pipeline`: the project directory name and the README title.
 
 ### Why you must delete `.venv`
 
@@ -256,4 +222,4 @@ error: Failed to spawn: `dg`
   Caused by: No such file or directory (os error 2)
 ```
 
-`uv sync` will not repair this — the installed packages are still valid, only the path moved. Deleting `.venv` and re-syncing regenerates every shebang, **but it must run at the final directory path** (after step 1); syncing earlier just bakes the stale path back in.
+`uv sync` will not repair this — the installed packages are still valid, only the path moved. Deleting `.venv` and re-syncing regenerates every shebang, **but `rm -rf .venv && just init` must run at the final directory path** (after the project root is renamed); syncing earlier just bakes the stale path back in.
