@@ -24,6 +24,7 @@ build-backend = "uv_build"
 dev = [
     "dagster-dg-cli>=1.13.20",
     "dagster-webserver>=1.13.20",
+    "pydantic>=2.13.5",
     "ruff>=0.16.5",
     "ty>=0.0.75",
 ]

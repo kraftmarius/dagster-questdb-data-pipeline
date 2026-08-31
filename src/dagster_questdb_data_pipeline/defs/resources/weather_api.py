@@ -5,6 +5,8 @@ import dagster as dg
 import httpx2
 from pydantic import Field
 
+from dagster_questdb_data_pipeline.models.weather import OpenMeteoResponse
+
 
 class WeatherApiResource(dg.ConfigurableResource):
     """Resource for fetching historical weather metrics from Open-Meteo."""
@@ -31,7 +33,7 @@ class WeatherApiResource(dg.ConfigurableResource):
         latitude: float | None = None,
         longitude: float | None = None,
         metrics: list[str] | None = None,
-    ) -> dict[str, Any]:
+    ) -> OpenMeteoResponse:
         """Fetch hourly time-series data for a defined time window."""
 
         lat = latitude if latitude is not None else self.default_latitude
@@ -40,7 +42,7 @@ class WeatherApiResource(dg.ConfigurableResource):
         selected_metrics = metrics or [
             "temperature_2m",
             "relative_humidity_2m",
-            "surface_pressure",
+            "pressure_msl",
             "wind_speed_10m",
         ]
 
@@ -57,4 +59,4 @@ class WeatherApiResource(dg.ConfigurableResource):
             response = client.get(self.base_url, params=params)
             response.raise_for_status()
 
-            return response.json()
+            return OpenMeteoResponse.model_validate_json(response.text)

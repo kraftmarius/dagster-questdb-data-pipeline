@@ -38,7 +38,7 @@ class QuestDbResource(dg.ConfigurableResource):
         if df.empty:
             return 0
 
-        with self.connect() as questdb, questdb.sender() as sender:
+        with self.connect() as db, db.sender() as sender:
             sender.dataframe(df, table_name=table_name, at="timestamp")
 
         return len(df)

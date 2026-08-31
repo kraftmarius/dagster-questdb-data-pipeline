@@ -22,6 +22,10 @@ into QuestDB through a daily-partitioned Dagster asset — a complete
 - **Env-driven configuration** — no secrets in code; everything is sourced
   from `.env`
 - **`just` task runner** — one command to boot the full dev environment
+- **Typed API responses** — Pydantic models with WMO-based range validation
+  (temperature, humidity, pressure, wind speed) fail fast on out-of-bounds data
+- **Data integrity check** — a blocking `asset_check` verifies row count and
+  metric bounds in QuestDB after each ingestion
 - **Quality gates**: `ruff` (lint + format), `ty` (type check), `dg check defs`
 
 ## Architecture
@@ -83,9 +87,10 @@ is not persisted across runs by design.
 ### Running the sample pipeline
 
 In the Dagster UI, select the `weather_raw` asset, pick a partition, and
-materialize. Run metadata includes `record_count`, `ingested_count`,
-`target_date`, and a Markdown data preview. Verify the table via the QuestDB
-console:
+materialize. Run metadata includes `table`, `row_count`, and `target_date`.
+A blocking `weather_raw_integrity_check` runs automatically after ingestion,
+validating row count (24) and WMO metric bounds. Verify the table via the
+QuestDB console:
 
 ```sql
 SELECT * FROM weather_raw ORDER BY timestamp DESC LIMIT 42;
@@ -120,12 +125,14 @@ Defaults are local-dev only. Change all credentials before any non-local use.
 │       └── compose.yaml            # QuestDB 10.0.1
 ├── src/dagster_questdb_data_pipeline/
 │   ├── definitions.py              # @definitions entry point (defs/ auto-discovery)
-│   └── defs/
-│       ├── assets/
-│       │   └── weather_raw.py      # weather_raw (daily partitions)
-│       └── resources/
-│           ├── weather_api.py      # WeatherApiResource
-│           └── questdb.py          # QuestDbResource
+│   ├── defs/
+│   │   ├── assets/
+│   │   │   └── weather_raw.py      # weather_raw asset + integrity check
+│   │   └── resources/
+│   │       ├── weather_api.py      # WeatherApiResource
+│   │       └── questdb.py          # QuestDbResource
+│   └── models/
+│       └── weather.py              # Pydantic models (OpenMeteoResponse, HourlyWeatherData)
 ├── tests/
 ├── justfile
 ├── pyproject.toml
@@ -161,7 +168,7 @@ CI-friendly quality gates, all enforced by `just lint`:
 
 ## Extending
 
-- **New source:** subclass `ConfigurableResource` in `defs/resources.py`,
+- **New source:** subclass `ConfigurableResource` in `defs/resources/`,
   register it in `resources()`
 - **New asset:** add a module under `defs/` (auto-discovered), use
   `QuestDbResource.ingest_dataframe()` for writes

@@ -43,6 +43,7 @@ fmt:
     @uv run ruff format
 
 # Automatically fix lint and format issues
-fix: fmt
+fix:
     @uv run ruff check --fix
     @uv run ty check --fix
+    @just fmt
