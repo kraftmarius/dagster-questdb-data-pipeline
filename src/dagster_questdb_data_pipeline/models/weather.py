@@ -1,8 +1,10 @@
 from dataclasses import dataclass
-from typing import Self
+from typing import Final, Self
 
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+WEATHER_RAW_TABLE: Final[str] = "weather_raw"
 
 
 @dataclass(frozen=True)
@@ -40,6 +42,7 @@ class HourlyWeatherData(BaseModel):
     @model_validator(mode="after")
     def validate_column_lengths_and_ranges(self) -> Self:
         """Enforce column length consistency and WMO range bounds on all metrics."""
+
         expected_len = len(self.time)
 
         for metric in self.metric_names():
@@ -62,6 +65,7 @@ class HourlyWeatherData(BaseModel):
 
     def to_dataframe(self) -> pd.DataFrame:
         """Convert to a pandas DataFrame, renaming `time` to `timestamp` (UTC)."""
+
         df = pd.DataFrame(self.model_dump())
         df["timestamp"] = pd.to_datetime(df.pop("time"), utc=True)
 

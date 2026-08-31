@@ -18,6 +18,8 @@ into QuestDB through a daily-partitioned Dagster asset — a complete
   - `WeatherApiResource` — Open-Meteo historical API client
   - `QuestDbResource` — QuestDB client with `ingest_dataframe()` for
     high-throughput DataFrame ingestion via the official Python client
+- **Schema provisioning** — packaged DDL applied via `just db-init` (auto-run
+  by `just dev`); idempotent `CREATE TABLE IF NOT EXISTS`
 - **Daily partitions** on the sample asset for backfillable, idempotent runs
 - **Env-driven configuration** — no secrets in code; everything is sourced
   from `.env`
@@ -75,9 +77,9 @@ just dev
 The sample ships pre-configured, see `.env.sample`. To point the pipeline at a real site, set
 `LATITUDE`/`LONGITUDE` in `.env`.
 
-`just dev` starts the infrastructure with `--wait` (healthchecked), launches
-`dg dev`, and **automatically tears down containers on exit** (Ctrl-C). Data
-is not persisted across runs by design.
+`just dev` starts the infrastructure with `--wait` (healthchecked), provisions
+the database schema, launches `dg dev`, and **automatically tears down
+containers on exit** (Ctrl-C). Data is not persisted across runs by design.
 
 | Service | URL |
 |---------|-----|
@@ -143,8 +145,12 @@ Defaults are local-dev only. Change all credentials before any non-local use.
 │   │   └── resources/
 │   │       ├── weather_api.py      # WeatherApiResource
 │   │       └── questdb.py          # QuestDbResource
-│   └── models/
-│       └── weather.py              # Pydantic models, WMO_BOUNDS registry (single source of truth for validation)
+│   ├── models/
+│   │   └── weather.py              # Pydantic models, WMO_BOUNDS registry, WEATHER_RAW_TABLE constant
+│   └── schema/
+│       ├── __main__.py             # CLI entrypoint (`python -m …schema`)
+│       └── ddl/
+│           └── weather_raw.sql     # QuestDB DDL (partitioned, WAL, dedup upsert)
 ├── tests/
 ├── justfile
 ├── pyproject.toml
@@ -162,7 +168,8 @@ Run `just list` for the full reference.
 | Task | Description |
 |------|-------------|
 | `just init` | Sync environment with lockfile (`uv sync --all-groups`) |
-| `just dev` | Start infrastructure + Dagster dev server (auto-cleanup on exit) |
+| `just dev` | Start infrastructure, provision schema, then Dagster dev server (auto-cleanup on exit) |
+| `just db-init` | Provision QuestDB tables from packaged DDL (private helper; auto-run by `just dev`) |
 | `just lint` | `ruff check` + `ruff format --check` + `ty check` + `dg check defs` |
 | `just fmt` | `ruff format` |
 | `just fix` | Format + auto-fix lint and type issues |
@@ -182,8 +189,8 @@ CI-friendly quality gates, all enforced by `just lint`:
 
 - **New source:** subclass `ConfigurableResource` in `defs/resources/`,
   register it in `resources()`
-- **New asset:** add a module under `defs/` (auto-discovered), use
-  `QuestDbResource.ingest_dataframe()` for writes
+- **New asset:** add a module under `defs/` (auto-discovered), add a DDL file
+  under `schema/ddl/`, then use `QuestDbResource.ingest_dataframe()` for writes
 - **New infrastructure:** add a compose file under `infra/*` and include it
   from `infra/compose.yaml`
 - **Workspace expansion:** the `dg` registry is pre-wired for

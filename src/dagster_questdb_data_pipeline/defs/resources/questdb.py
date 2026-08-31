@@ -5,7 +5,7 @@ from pydantic import Field
 
 
 class QuestDbResource(dg.ConfigurableResource):
-    """Resource for interacting with QuestDB."""
+    """Resource for interacting with QuestDB via QWP."""
 
     host: str = Field(
         default="localhost",

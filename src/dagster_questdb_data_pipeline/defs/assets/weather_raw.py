@@ -1,12 +1,11 @@
-from typing import Final
-
 import dagster as dg
 
 from dagster_questdb_data_pipeline.defs.resources.questdb import QuestDbResource
 from dagster_questdb_data_pipeline.defs.resources.weather_api import WeatherApiResource
-from dagster_questdb_data_pipeline.models.weather import WMO_BOUNDS
-
-WEATHER_RAW_TABLE: Final[str] = "weather_raw"
+from dagster_questdb_data_pipeline.models.weather import (
+    WEATHER_RAW_TABLE,
+    WMO_BOUNDS,
+)
 
 
 @dg.asset(
@@ -24,6 +23,7 @@ def raw(
 
     response = weather_api.fetch_hourly(start_date=target_date, end_date=target_date)
     df = response.hourly.to_dataframe()
+
     row_count = questdb.ingest_dataframe(WEATHER_RAW_TABLE, df)
 
     return dg.Output(

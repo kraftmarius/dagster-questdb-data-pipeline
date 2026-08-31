@@ -27,6 +27,7 @@ dev:
 
     echo "=== Starting infrastructure... ==="
     just infra up --wait
+    just db-init
 
     echo "=== Starting Dagster dev server... ==="
     uv run dg dev
@@ -47,3 +48,8 @@ fix:
     @uv run ruff check --fix
     @uv run ty check --fix
     @just fmt
+
+# Provision database tables and schema rules
+[private]
+db-init:
+    @uv run python -m dagster_questdb_data_pipeline.schema
