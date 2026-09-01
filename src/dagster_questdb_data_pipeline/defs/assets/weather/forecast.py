@@ -1,39 +1,39 @@
+from datetime import UTC
+
 import dagster as dg
+import pandas as pd
 
 from dagster_questdb_data_pipeline.defs.resources.questdb import QuestDbResource
 from dagster_questdb_data_pipeline.defs.resources.weather_api import WeatherApiResource
 from dagster_questdb_data_pipeline.models.weather import (
+    WEATHER_FORECAST_TABLE,
     WEATHER_GROUP_NAME,
-    WEATHER_RAW_TABLE,
     WMO_BOUNDS,
 )
 
 
 @dg.asset(
-    name=WEATHER_RAW_TABLE,
-    description="Fetches raw weather metrics and ingests them into QuestDB.",
+    name=WEATHER_FORECAST_TABLE,
+    description="Ingests rolling hourly weather forecast horizon (+24 hours) into QuestDB.",
     group_name=WEATHER_GROUP_NAME,
     kinds={"questdb"},
-    partitions_def=dg.DailyPartitionsDefinition(start_date="2026-01-01", timezone="UTC"),
-    automation_condition=dg.AutomationCondition.on_cron("0 1 * * *"),
+    automation_condition=dg.AutomationCondition.on_cron("@hourly"),
 )
-def raw(
-    context: dg.AssetExecutionContext,
+def forecast(
     weather_api: WeatherApiResource,
     questdb: QuestDbResource,
 ) -> dg.Output[None]:
-    target_date = context.partition_time_window.start.date()
+    response = weather_api.fetch_forecast_hourly()
 
-    response = weather_api.fetch_historical_hourly(start_date=target_date, end_date=target_date)
     df = response.hourly.to_dataframe()
+    df["generated_at"] = pd.Timestamp.now(UTC)
 
-    row_count = questdb.ingest_dataframe(WEATHER_RAW_TABLE, df)
+    row_count = questdb.ingest_dataframe(WEATHER_FORECAST_TABLE, df)
 
     return dg.Output(
         value=None,
         metadata={
-            "table": dg.MetadataValue.text(WEATHER_RAW_TABLE),
-            "target_date": dg.MetadataValue.text(target_date.isoformat()),
+            "table": dg.MetadataValue.text(WEATHER_FORECAST_TABLE),
             "dagster/row_count": dg.MetadataValue.int(row_count),
         },
     )
@@ -41,16 +41,13 @@ def raw(
 
 @dg.asset_check(
     name="integrity_check",
-    description="Validates that QuestDB partition has exactly 24 hourly rows and plausible metrics against WMO standards.",
-    asset=WEATHER_RAW_TABLE,
+    description="Validates that QuestDB forecast horizon has sufficient rows and plausible metrics against WMO standards.",
+    asset=WEATHER_FORECAST_TABLE,
     blocking=True,
 )
-def raw_integrity_check(
-    context: dg.AssetCheckExecutionContext,
+def forecast_integrity_check(
     questdb: QuestDbResource,
 ) -> dg.AssetCheckResult:
-    target_date = context.partition_time_window.start.date()
-
     # Dynamically compose SQL aggregations strictly from immutable domain model
     metric_aggregations = ",\n            ".join(
         f"min({m}) as min_{m}, max({m}) as max_{m}" for m in WMO_BOUNDS
@@ -60,11 +57,10 @@ def raw_integrity_check(
         SELECT
             count() as row_count,
             {metric_aggregations}
-        FROM {WEATHER_RAW_TABLE}
-        WHERE timestamp IN $1;
+        FROM {WEATHER_FORECAST_TABLE};
     """
 
-    with questdb.connect() as db, db.query(sql, [target_date.isoformat()]) as result:
+    with questdb.connect() as db, db.query(sql) as result:
         df = result.to_pandas()
 
     if df.empty or int(df.iloc[0]["row_count"]) == 0:
@@ -72,8 +68,7 @@ def raw_integrity_check(
             passed=False,
             severity=dg.AssetCheckSeverity.ERROR,
             metadata={
-                "target_date": dg.MetadataValue.text(target_date.isoformat()),
-                "error": dg.MetadataValue.text("Zero rows found for partition in QuestDB."),
+                "error": dg.MetadataValue.text("Zero rows found in forecast table in QuestDB."),
             },
         )
 
@@ -82,12 +77,11 @@ def raw_integrity_check(
 
     violations: list[str] = []
     metadata: dict[str, dg.MetadataValue] = {
-        "target_date": dg.MetadataValue.text(target_date.isoformat()),
         "dagster/row_count": dg.MetadataValue.int(row_count),
     }
 
-    if row_count != 24:
-        violations.append(f"Incomplete partition: expected 24 rows, got {row_count}.")
+    if row_count < 24:
+        violations.append(f"Incomplete forecast horizon: expected >= 24 rows, got {row_count}.")
 
     for metric, bounds in WMO_BOUNDS.items():
         min_col = f"min_{metric}"

@@ -5,9 +5,10 @@ Time-series data pipeline template built with
 
 Out of the box it ingests hourly weather telemetry from the
 [Open-Meteo Archive API](https://open-meteo.com/en/docs/historical-weather-api)
+and [Forecast API](https://open-meteo.com/en/docs/forecast-api)
 into QuestDB and computes in-engine daily rollups — a complete
-**API → raw asset → rollup asset → time-series database** flow ready
-to be repurposed.
+**API → raw/forecast assets → rollup asset → time-series database** flow
+ready to be repurposed.
 
 ## What's inside
 
@@ -16,32 +17,39 @@ to be repurposed.
 - **QuestDB 10.0.1** as local Docker Compose infrastructure (no code needed
   to stand it up)
 - **Two configurable resources**:
-  - `WeatherApiResource` — Open-Meteo historical API client
+  - `WeatherApiResource` — Open-Meteo historical & forecast API client
   - `QuestDbResource` — QuestDB client with `ingest_dataframe()` for
     high-throughput DataFrame ingestion via the official Python client
 - **Schema provisioning** — packaged DDL applied via `just db-init` (auto-run
   by `just dev`); idempotent `CREATE TABLE IF NOT EXISTS`
-- **Daily partitions** (UTC) on all assets for backfillable, idempotent runs
+- **Daily partitions** (UTC) on raw and rollup assets for backfillable, idempotent runs
 - **Automation conditions** + **sensor** for fully automated, scheduled execution
 - **Env-driven configuration** — no secrets in code; everything is sourced
   from `.env`
 - **`just` task runner** — one command to boot the full dev environment
 - **Typed API responses** — Pydantic models with WMO-based range validation
-  (temperature, humidity, pressure, wind speed) fail fast on out-of-bounds data
+  (temperature, humidity, pressure, wind speed) fail fast on out-of-bounds data;
+  `AlertRule` domain model defines operational thresholds for predictive alerting
 - **In-engine daily rollup** — `SAMPLE BY 1d ALIGN TO CALENDAR` aggregates
   24 hourly rows into daily statistics directly in QuestDB (no Python
   compute), driven by a typed `ROLLUP_PROJECTIONS` domain model
 - **Data integrity checks** — blocking `asset_check` on each asset verifies
-  row count, metric bounds, and mathematical consistency (min ≤ avg ≤ max)
+  row count, WMO metric bounds, and mathematical consistency (min ≤ avg ≤ max);
+  forecast check additionally validates 24 h horizon completeness
 - **Quality gates**: `ruff` (lint + format), `ty` (type check), `dg check defs`
 
 ## Architecture
 
 ```
 ┌──────────────────────┐      ┌───────────────────────────────┐      ┌──────────────────────────────┐      ┌────────────────┐
-│  Open-Meteo Archive  │ ───► │          weather_raw          │ ───► │      weather_daily_rollup    │ ───► │     QuestDB    │
-│   API (hourly data)  │      │  @dg.asset · daily partitions │      │  @dg.asset · in-engine SQL   │      │  (REST :9000)  │
-└──────────────────────┘      └───────────────────────────────┘      └──────────────────────────────┘      └────────────────┘
+│  Open-Meteo Archive  │ ───► │          weather_raw          │ ───► │      weather_daily_rollup    │ ───► │                │
+│   API (hourly data)  │      │  @dg.asset · daily partitions │      │  @dg.asset · in-engine SQL   │      │                │
+└──────────────────────┘      └───────────────────────────────┘      └──────────────────────────────┘      │     QuestDB    │
+                                                                                                           │  (REST :9000)  │
+┌──────────────────────┐      ┌───────────────────────────────┐                                            │                │
+│  Open-Meteo Forecast │ ───► │        weather_forecast       │ ─────────────────────────────────────────► │                │
+│   API (24h rolling)  │      │    @dg.asset · hourly cron    │                                            └────────────────┘
+└──────────────────────┘      └───────────────────────────────┘
 ```
 
 Both assets declare `kinds={"questdb", "sql"}` (rollup) or
@@ -52,8 +60,10 @@ Execution is driven by **automation conditions** evaluated by an
 `AutomationConditionSensor` targeting the `weather` asset group:
 `weather_raw` fires on a daily 01:00 UTC cron; `weather_daily_rollup`
 fires eagerly as soon as `weather_raw` materializes for the same
-partition. Each trigger materializes only the latest available
-partition — historical gaps require explicit backfill via the UI.
+partition; `weather_forecast` fires hourly (`@hourly` cron), ingesting
+the rolling 24 h forecast window. Each trigger materializes only the
+latest available partition — historical gaps require explicit backfill
+via the UI.
 
 | Port | Protocol | Purpose | Exposed by default |
 |------|----------|---------|--------------------|
@@ -103,18 +113,21 @@ containers on exit** (Ctrl-C). Data is not persisted across runs by design.
 
 The automation sensor is enabled by default — with `just dev` running,
 `weather_raw` will auto-materialize at 01:00 UTC daily and
-`weather_daily_rollup` will follow immediately after. You can also
-materialize manually: select an asset (`weather_raw` or
-`weather_daily_rollup`), pick a partition, and materialize. Each asset
-has a blocking
+`weather_daily_rollup` will follow immediately after. `weather_forecast`
+materializes hourly via `@hourly` cron. You can also materialize manually:
+select an asset (`weather_raw`, `weather_forecast`, or
+`weather_daily_rollup`), pick a partition (if applicable), and
+materialize. Each asset has a blocking
 `integrity_check`: the raw check validates row count (24) and WMO metric
-bounds; the rollup check validates mathematical consistency
+bounds; the forecast check validates horizon completeness (≥24 rows) and
+WMO bounds; the rollup check validates mathematical consistency
 (min ≤ avg ≤ max, diurnal range) and WMO bounds. Verify the tables via
 the QuestDB console:
 
 ```sql
 SELECT * FROM weather_raw ORDER BY timestamp DESC LIMIT 42;
-SELECT * FROM weather_daily_rollup ORDER BY timestamp DESC LIMIT 30;
+SELECT * FROM weather_forecast ORDER BY timestamp DESC LIMIT 42;
+SELECT * FROM weather_daily_rollup ORDER BY timestamp DESC LIMIT 42;
 ```
 
 ### WMO Validation Thresholds
@@ -162,6 +175,7 @@ Defaults are local-dev only. Change all credentials before any non-local use.
 │   │   ├── assets/
 │   │   │   └── weather/
 │   │   │       ├── raw.py              # weather_raw asset + integrity check
+│   │   │       ├── forecast.py         # weather_forecast asset + integrity check
 │   │   │       └── daily_rollup.py     # weather_daily_rollup asset + integrity check
 │   │   ├── resources/
 │   │   │   ├── weather_api.py      # WeatherApiResource
@@ -174,6 +188,7 @@ Defaults are local-dev only. Change all credentials before any non-local use.
 │       ├── __main__.py             # CLI entrypoint (`python -m …schema`)
 │       └── ddl/
 │           ├── weather_raw.sql             # QuestDB DDL (hourly, partitioned, WAL, dedup)
+│           ├── weather_forecast.sql        # QuestDB DDL (hourly, partitioned, WAL, dedup)
 │           └── weather_daily_rollup.sql    # QuestDB DDL (daily, partitioned, WAL, dedup)
 ├── tests/
 ├── justfile

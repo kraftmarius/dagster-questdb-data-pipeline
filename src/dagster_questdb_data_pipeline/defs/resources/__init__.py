@@ -9,8 +9,8 @@ def resources():
     return dg.Definitions(
         resources={
             "weather_api": WeatherApiResource(
-                default_latitude=dg.EnvVar("LATITUDE").get_value(),
-                default_longitude=dg.EnvVar("LONGITUDE").get_value(),
+                latitude=dg.EnvVar("LATITUDE").get_value(),
+                longitude=dg.EnvVar("LONGITUDE").get_value(),
             ),
             "questdb": QuestDbResource(
                 host=dg.EnvVar("QDB_HOST").get_value(),

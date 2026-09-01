@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Final, Self
+from typing import Final, Literal, Self
 
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 WEATHER_GROUP_NAME: Final[str] = "weather"
 WEATHER_RAW_TABLE: Final[str] = "weather_raw"
 WEATHER_DAILY_ROLLUP_TABLE: Final[str] = "weather_daily_rollup"
+WEATHER_FORECAST_TABLE: Final[str] = "weather_forecast"
 
 
 @dataclass(frozen=True)
@@ -46,6 +47,46 @@ ROLLUP_PROJECTIONS: Final[tuple[RollupProjection, ...]] = (
     RollupProjection("avg(relative_humidity_2m)", "avg_relative_humidity_2m", "%"),
     RollupProjection("avg(pressure_msl)", "avg_pressure_msl", "hPa"),
     RollupProjection("max(wind_speed_10m)", "max_wind_speed_10m", "km/h"),
+)
+
+
+@dataclass(frozen=True)
+class AlertRule:
+    """Operational threshold for predictive alerting."""
+
+    metric: str
+    comparator: Literal["gt", "lt", "gte", "lte"]
+    threshold: float
+    unit: str
+    severity: Literal["warning", "critical"]
+    description: str
+
+
+ALERT_RULES: tuple[AlertRule, ...] = (
+    AlertRule(
+        metric="wind_speed_10m",
+        comparator="gt",
+        threshold=60.0,
+        unit="km/h",
+        severity="warning",
+        description="Gale-force wind warning (> 60 km/h)",
+    ),
+    AlertRule(
+        metric="temperature_2m",
+        comparator="lt",
+        threshold=0.0,
+        unit="°C",
+        severity="warning",
+        description="Frost warning (< 0 °C)",
+    ),
+    AlertRule(
+        metric="temperature_2m",
+        comparator="gt",
+        threshold=38.0,
+        unit="°C",
+        severity="critical",
+        description="Extreme heat anomaly (> 38 °C)",
+    ),
 )
 
 
