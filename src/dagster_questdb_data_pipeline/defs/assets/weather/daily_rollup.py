@@ -4,6 +4,7 @@ from dagster_questdb_data_pipeline.defs.resources.questdb import QuestDbResource
 from dagster_questdb_data_pipeline.models.weather import (
     ROLLUP_PROJECTIONS,
     WEATHER_DAILY_ROLLUP_TABLE,
+    WEATHER_GROUP_NAME,
     WEATHER_RAW_TABLE,
     WMO_BOUNDS,
 )
@@ -12,9 +13,11 @@ from dagster_questdb_data_pipeline.models.weather import (
 @dg.asset(
     name=WEATHER_DAILY_ROLLUP_TABLE,
     description="Computes in-engine daily downsampled weather statistics from raw telemetry.",
+    group_name=WEATHER_GROUP_NAME,
     kinds={"questdb", "sql"},
     deps={WEATHER_RAW_TABLE},
-    partitions_def=dg.DailyPartitionsDefinition(start_date="2026-01-01"),
+    partitions_def=dg.DailyPartitionsDefinition(start_date="2026-01-01", timezone="UTC"),
+    automation_condition=dg.AutomationCondition.eager(),
 )
 def daily_rollup(
     context: dg.AssetExecutionContext,

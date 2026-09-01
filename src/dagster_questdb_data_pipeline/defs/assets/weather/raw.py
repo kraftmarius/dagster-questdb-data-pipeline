@@ -3,6 +3,7 @@ import dagster as dg
 from dagster_questdb_data_pipeline.defs.resources.questdb import QuestDbResource
 from dagster_questdb_data_pipeline.defs.resources.weather_api import WeatherApiResource
 from dagster_questdb_data_pipeline.models.weather import (
+    WEATHER_GROUP_NAME,
     WEATHER_RAW_TABLE,
     WMO_BOUNDS,
 )
@@ -11,8 +12,10 @@ from dagster_questdb_data_pipeline.models.weather import (
 @dg.asset(
     name=WEATHER_RAW_TABLE,
     description="Fetches raw weather metrics and ingests them into QuestDB.",
+    group_name=WEATHER_GROUP_NAME,
     kinds={"questdb"},
-    partitions_def=dg.DailyPartitionsDefinition(start_date="2026-01-01"),
+    partitions_def=dg.DailyPartitionsDefinition(start_date="2026-01-01", timezone="UTC"),
+    automation_condition=dg.AutomationCondition.on_cron("0 1 * * *"),
 )
 def raw(
     context: dg.AssetExecutionContext,

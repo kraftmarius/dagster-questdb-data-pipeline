@@ -4,6 +4,7 @@ from typing import Final, Self
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+WEATHER_GROUP_NAME: Final[str] = "weather"
 WEATHER_RAW_TABLE: Final[str] = "weather_raw"
 WEATHER_DAILY_ROLLUP_TABLE: Final[str] = "weather_daily_rollup"
 

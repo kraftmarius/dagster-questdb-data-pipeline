@@ -21,7 +21,8 @@ to be repurposed.
     high-throughput DataFrame ingestion via the official Python client
 - **Schema provisioning** — packaged DDL applied via `just db-init` (auto-run
   by `just dev`); idempotent `CREATE TABLE IF NOT EXISTS`
-- **Daily partitions** on all assets for backfillable, idempotent runs
+- **Daily partitions** (UTC) on all assets for backfillable, idempotent runs
+- **Automation conditions** + **sensor** for fully automated, scheduled execution
 - **Env-driven configuration** — no secrets in code; everything is sourced
   from `.env`
 - **`just` task runner** — one command to boot the full dev environment
@@ -46,6 +47,13 @@ to be repurposed.
 Both assets declare `kinds={"questdb", "sql"}` (rollup) or
 `kinds={"questdb"}` (raw), so the Dagster UI attributes compute
 to the time-series database rather than the Python worker.
+
+Execution is driven by **automation conditions** evaluated by an
+`AutomationConditionSensor` targeting the `weather` asset group:
+`weather_raw` fires on a daily 01:00 UTC cron; `weather_daily_rollup`
+fires eagerly as soon as `weather_raw` materializes for the same
+partition. Each trigger materializes only the latest available
+partition — historical gaps require explicit backfill via the UI.
 
 | Port | Protocol | Purpose | Exposed by default |
 |------|----------|---------|--------------------|
@@ -93,8 +101,12 @@ containers on exit** (Ctrl-C). Data is not persisted across runs by design.
 
 ### Running the sample pipeline
 
-In the Dagster UI, select an asset (`weather_raw` or `weather_daily_rollup`),
-pick a partition, and materialize. Each asset has a blocking
+The automation sensor is enabled by default — with `just dev` running,
+`weather_raw` will auto-materialize at 01:00 UTC daily and
+`weather_daily_rollup` will follow immediately after. You can also
+materialize manually: select an asset (`weather_raw` or
+`weather_daily_rollup`), pick a partition, and materialize. Each asset
+has a blocking
 `integrity_check`: the raw check validates row count (24) and WMO metric
 bounds; the rollup check validates mathematical consistency
 (min ≤ avg ≤ max, diurnal range) and WMO bounds. Verify the tables via
@@ -151,11 +163,13 @@ Defaults are local-dev only. Change all credentials before any non-local use.
 │   │   │   └── weather/
 │   │   │       ├── raw.py              # weather_raw asset + integrity check
 │   │   │       └── daily_rollup.py     # weather_daily_rollup asset + integrity check
-│   │   └── resources/
-│   │       ├── weather_api.py      # WeatherApiResource
-│   │       └── questdb.py          # QuestDbResource
+│   │   ├── resources/
+│   │   │   ├── weather_api.py      # WeatherApiResource
+│   │   │   └── questdb.py          # QuestDbResource
+│   │   └── sensors/
+│   │       └── weather.py          # AutomationConditionSensor (weather group)
 │   ├── models/
-│   │   └── weather.py              # Pydantic models, WMO_BOUNDS, ROLLUP_PROJECTIONS, table constants
+│   │   └── weather.py              # Pydantic models, WMO_BOUNDS, ROLLUP_PROJECTIONS, group/table constants
 │   └── schema/
 │       ├── __main__.py             # CLI entrypoint (`python -m …schema`)
 │       └── ddl/
@@ -199,8 +213,11 @@ CI-friendly quality gates, all enforced by `just lint`:
 
 - **New source:** subclass `ConfigurableResource` in `defs/resources/`,
   register it in `resources()`
-- **New asset:** add a module under `defs/` (auto-discovered), add a DDL file
-  under `schema/ddl/`, then use `QuestDbResource.ingest_dataframe()` for writes
+- **New asset:** add a module under `defs/` (auto-discovered), assign a
+  `group_name` and `automation_condition`, add a DDL file under `schema/ddl/`,
+  then use `QuestDbResource.ingest_dataframe()` for writes. Assets in the
+  `weather` group are picked up by the existing sensor; a new group needs
+  its own sensor (or extend the target selection)
 - **New infrastructure:** add a compose file under `infra/*` and include it
   from `infra/compose.yaml`
 - **Workspace expansion:** the `dg` registry is pre-wired for
