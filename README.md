@@ -5,8 +5,9 @@ Time-series data pipeline template built with
 
 Out of the box it ingests hourly weather telemetry from the
 [Open-Meteo Archive API](https://open-meteo.com/en/docs/historical-weather-api)
-into QuestDB through a daily-partitioned Dagster asset — a complete
-**API → asset → time-series database** flow ready to be repurposed.
+into QuestDB and computes in-engine daily rollups — a complete
+**API → raw asset → rollup asset → time-series database** flow ready
+to be repurposed.
 
 ## What's inside
 
@@ -20,27 +21,39 @@ into QuestDB through a daily-partitioned Dagster asset — a complete
     high-throughput DataFrame ingestion via the official Python client
 - **Schema provisioning** — packaged DDL applied via `just db-init` (auto-run
   by `just dev`); idempotent `CREATE TABLE IF NOT EXISTS`
-- **Daily partitions** on the sample asset for backfillable, idempotent runs
+- **Daily partitions** (UTC) on all assets for backfillable, idempotent runs
+- **Automation conditions** + **sensor** for fully automated, scheduled execution
 - **Env-driven configuration** — no secrets in code; everything is sourced
   from `.env`
 - **`just` task runner** — one command to boot the full dev environment
 - **Typed API responses** — Pydantic models with WMO-based range validation
   (temperature, humidity, pressure, wind speed) fail fast on out-of-bounds data
-- **Data integrity check** — a blocking `asset_check` verifies row count and
-  metric bounds in QuestDB after each ingestion
+- **In-engine daily rollup** — `SAMPLE BY 1d ALIGN TO CALENDAR` aggregates
+  24 hourly rows into daily statistics directly in QuestDB (no Python
+  compute), driven by a typed `ROLLUP_PROJECTIONS` domain model
+- **Data integrity checks** — blocking `asset_check` on each asset verifies
+  row count, metric bounds, and mathematical consistency (min ≤ avg ≤ max)
 - **Quality gates**: `ruff` (lint + format), `ty` (type check), `dg check defs`
 
 ## Architecture
 
 ```
-┌──────────────────────┐      ┌───────────────────────────────┐      ┌────────────────┐
-│  Open-Meteo Archive  │ ───► │          weather_raw          │ ───► │     QuestDB    │
-│   API (hourly data)  │      │  @dg.asset · daily partitions │      │  (REST :9000)  │
-└──────────────────────┘      └───────────────────────────────┘      └────────────────┘
+┌──────────────────────┐      ┌───────────────────────────────┐      ┌──────────────────────────────┐      ┌────────────────┐
+│  Open-Meteo Archive  │ ───► │          weather_raw          │ ───► │      weather_daily_rollup    │ ───► │     QuestDB    │
+│   API (hourly data)  │      │  @dg.asset · daily partitions │      │  @dg.asset · in-engine SQL   │      │  (REST :9000)  │
+└──────────────────────┘      └───────────────────────────────┘      └──────────────────────────────┘      └────────────────┘
 ```
 
-The asset declares `kinds={"questdb"}`, so the Dagster UI attributes compute
+Both assets declare `kinds={"questdb", "sql"}` (rollup) or
+`kinds={"questdb"}` (raw), so the Dagster UI attributes compute
 to the time-series database rather than the Python worker.
+
+Execution is driven by **automation conditions** evaluated by an
+`AutomationConditionSensor` targeting the `weather` asset group:
+`weather_raw` fires on a daily 01:00 UTC cron; `weather_daily_rollup`
+fires eagerly as soon as `weather_raw` materializes for the same
+partition. Each trigger materializes only the latest available
+partition — historical gaps require explicit backfill via the UI.
 
 | Port | Protocol | Purpose | Exposed by default |
 |------|----------|---------|--------------------|
@@ -88,14 +101,20 @@ containers on exit** (Ctrl-C). Data is not persisted across runs by design.
 
 ### Running the sample pipeline
 
-In the Dagster UI, select the `weather_raw` asset, pick a partition, and
-materialize. Run metadata includes `table`, `row_count`, and `target_date`.
-A blocking `integrity_check` runs automatically after ingestion,
-validating row count (24) and WMO metric bounds. Verify the table via the
-QuestDB console:
+The automation sensor is enabled by default — with `just dev` running,
+`weather_raw` will auto-materialize at 01:00 UTC daily and
+`weather_daily_rollup` will follow immediately after. You can also
+materialize manually: select an asset (`weather_raw` or
+`weather_daily_rollup`), pick a partition, and materialize. Each asset
+has a blocking
+`integrity_check`: the raw check validates row count (24) and WMO metric
+bounds; the rollup check validates mathematical consistency
+(min ≤ avg ≤ max, diurnal range) and WMO bounds. Verify the tables via
+the QuestDB console:
 
 ```sql
 SELECT * FROM weather_raw ORDER BY timestamp DESC LIMIT 42;
+SELECT * FROM weather_daily_rollup ORDER BY timestamp DESC LIMIT 30;
 ```
 
 ### WMO Validation Thresholds
@@ -141,16 +160,21 @@ Defaults are local-dev only. Change all credentials before any non-local use.
 │   ├── definitions.py              # @definitions entry point (defs/ auto-discovery)
 │   ├── defs/
 │   │   ├── assets/
-│   │   │   └── weather_raw.py      # weather_raw asset + integrity check
-│   │   └── resources/
-│   │       ├── weather_api.py      # WeatherApiResource
-│   │       └── questdb.py          # QuestDbResource
+│   │   │   └── weather/
+│   │   │       ├── raw.py              # weather_raw asset + integrity check
+│   │   │       └── daily_rollup.py     # weather_daily_rollup asset + integrity check
+│   │   ├── resources/
+│   │   │   ├── weather_api.py      # WeatherApiResource
+│   │   │   └── questdb.py          # QuestDbResource
+│   │   └── sensors/
+│   │       └── weather.py          # AutomationConditionSensor (weather group)
 │   ├── models/
-│   │   └── weather.py              # Pydantic models, WMO_BOUNDS registry, WEATHER_RAW_TABLE constant
+│   │   └── weather.py              # Pydantic models, WMO_BOUNDS, ROLLUP_PROJECTIONS, group/table constants
 │   └── schema/
 │       ├── __main__.py             # CLI entrypoint (`python -m …schema`)
 │       └── ddl/
-│           └── weather_raw.sql     # QuestDB DDL (partitioned, WAL, dedup upsert)
+│           ├── weather_raw.sql             # QuestDB DDL (hourly, partitioned, WAL, dedup)
+│           └── weather_daily_rollup.sql    # QuestDB DDL (daily, partitioned, WAL, dedup)
 ├── tests/
 ├── justfile
 ├── pyproject.toml
@@ -189,8 +213,11 @@ CI-friendly quality gates, all enforced by `just lint`:
 
 - **New source:** subclass `ConfigurableResource` in `defs/resources/`,
   register it in `resources()`
-- **New asset:** add a module under `defs/` (auto-discovered), add a DDL file
-  under `schema/ddl/`, then use `QuestDbResource.ingest_dataframe()` for writes
+- **New asset:** add a module under `defs/` (auto-discovered), assign a
+  `group_name` and `automation_condition`, add a DDL file under `schema/ddl/`,
+  then use `QuestDbResource.ingest_dataframe()` for writes. Assets in the
+  `weather` group are picked up by the existing sensor; a new group needs
+  its own sensor (or extend the target selection)
 - **New infrastructure:** add a compose file under `infra/*` and include it
   from `infra/compose.yaml`
 - **Workspace expansion:** the `dg` registry is pre-wired for
@@ -198,39 +225,22 @@ CI-friendly quality gates, all enforced by `just lint`:
 
 ## Renaming the project
 
-This is a template — rename it to your product. The name exists in **two forms** that must stay consistent:
+This is a template — rename it to your project and run `rm -rf .venv && just init`. The name appears in **two forms** that must stay consistent:
 
-- **Module** (snake_case) — `dagster_questdb_data_pipeline`: Python package, `root_module`, ruff `known-first-party`, `registry_modules`, `[project] name`, and `COMPOSE_PROJECT_NAME`.
-- **Distribution** (kebab-case) — `dagster-questdb-data-pipeline`: the README title and the root package name in `uv.lock`.
-
-### Rename checklist
-
-| Location | Current value |
-|----------|---------------|
-| `pyproject.toml` → `[project] name` | `dagster_questdb_data_pipeline` |
-| `pyproject.toml` → `[tool.ruff.lint.isort] known-first-party` | `["dagster_questdb_data_pipeline"]` |
-| `pyproject.toml` → `[tool.dg.project] root_module` | `dagster_questdb_data_pipeline` |
-| `pyproject.toml` → `[tool.dg.project] registry_modules` | `dagster_questdb_data_pipeline.components.*` |
-| `src/<module>/` | `src/dagster_questdb_data_pipeline/` |
-| `src/<module>/defs/assets/weather_raw.py` | `from dagster_questdb_data_pipeline.defs.resources.questdb import …` |
-| `justfile` → `COMPOSE_PROJECT_NAME` default | `dagster_questdb_data_pipeline` |
-| `.env` / `.env.sample` → `COMPOSE_PROJECT_NAME` | `dagster_questdb_data_pipeline` |
-| `README.md` | title, config table, layout tree |
-
-`uv.lock` (root `[[package]] name`) **regenerates** on the next sync — do not hand-edit.
+- **Module** (snake_case) — `dagster_questdb_data_pipeline`: the Python package name used for imports, `root_module`, and `COMPOSE_PROJECT_NAME`.
+- **Distribution** (kebab-case) — `dagster-questdb-data-pipeline`: the project directory name and the README title.
 
 ### Procedure
 
-```bash
+```
 # 1. Rename the project directory itself (run from the parent directory)
 mv dagster-questdb-data-pipeline <new_project_dir>
 cd <new_project_dir>
 
 # 2. Rename the package directory
-git mv src/dagster_questdb_data_pipeline src/<new_module_name>
+mv src/dagster_questdb_data_pipeline src/<new_module_name>
 
 # 3. Replace every name reference (a repo-wide search/replace of the two forms
-#    above covers pyproject.toml, defs/, justfile, .env.sample, README.md)
 
 # 4. Regenerate the lockfile and venv — MUST run last, at the final path
 rm -rf .venv
@@ -246,4 +256,4 @@ error: Failed to spawn: `dg`
   Caused by: No such file or directory (os error 2)
 ```
 
-`uv sync` will not repair this — the installed packages are still valid, only the path moved. Deleting `.venv` and re-syncing regenerates every shebang, **but it must run at the final directory path** (after step 1); syncing earlier just bakes the stale path back in.
+`uv sync` will not repair this — the installed packages are still valid, only the path moved. Deleting `.venv` and re-syncing regenerates every shebang, **but `rm -rf .venv && just init` must run at the final directory path** (after the project root is renamed); syncing earlier just bakes the stale path back in.
