@@ -213,6 +213,23 @@ This is a template — rename it to your project and run `rm -rf .venv && just i
 - **Module** (snake_case) — `dagster_questdb_data_pipeline`: the Python package name used for imports, `root_module`, and `COMPOSE_PROJECT_NAME`.
 - **Distribution** (kebab-case) — `dagster-questdb-data-pipeline`: the project directory name and the README title.
 
+### Procedure
+
+```
+# 1. Rename the project directory itself (run from the parent directory)
+mv dagster-questdb-data-pipeline <new_project_dir>
+cd <new_project_dir>
+
+# 2. Rename the package directory
+mv src/dagster_questdb_data_pipeline src/<new_module_name>
+
+# 3. Replace every name reference (a repo-wide search/replace of the two forms
+
+# 4. Regenerate the lockfile and venv — MUST run last, at the final path
+rm -rf .venv
+just init
+```
+
 ### Why you must delete `.venv`
 
 uv writes Python **console scripts** (`dg`, `dagster`, `dagster-webserver`, and your CLI command) as text files with a **hardcoded absolute shebang** to the venv interpreter. Renaming the project directory orphans that path, so the scripts fail to spawn:
