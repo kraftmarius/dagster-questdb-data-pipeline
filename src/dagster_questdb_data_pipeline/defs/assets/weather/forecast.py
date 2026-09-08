@@ -5,6 +5,7 @@ import pandas as pd
 
 from dagster_questdb_data_pipeline.defs.resources.questdb import QuestDbResource
 from dagster_questdb_data_pipeline.defs.resources.weather_api import WeatherApiResource
+from dagster_questdb_data_pipeline.models.notification import WeatherAlertPayload
 from dagster_questdb_data_pipeline.models.weather import (
     ALERT_RULES,
     WEATHER_FORECAST_TABLE,
@@ -183,15 +184,13 @@ def forecast_alerts(
     alerts_count = len(active_alerts)
     status = "ALERTS_ACTIVE" if alerts_count > 0 else "NOMINAL"
 
+    payload = WeatherAlertPayload(alerts_count=alerts_count, alerts=active_alerts)
+
     return dg.Output(
         value=None,
         metadata={
             "status": dg.MetadataValue.text(status),
             "active_alerts_count": dg.MetadataValue.int(alerts_count),
-            "active_alerts": (
-                dg.MetadataValue.json(active_alerts)
-                if active_alerts
-                else dg.MetadataValue.text("None")
-            ),
+            "payload": dg.MetadataValue.json(payload.model_dump(mode="json")),
         },
     )

@@ -2,6 +2,7 @@ import dagster as dg
 
 from dagster_questdb_data_pipeline.defs.resources.questdb import QuestDbResource
 from dagster_questdb_data_pipeline.defs.resources.weather_api import WeatherApiResource
+from dagster_questdb_data_pipeline.defs.resources.webhook import WebhookResource
 
 
 @dg.definitions
@@ -18,5 +19,6 @@ def resources():
                 username=dg.EnvVar("QDB_PG_USER").get_value(),
                 password=dg.EnvVar("QDB_PG_PASSWORD").get_value(),
             ),
+            "webhook": WebhookResource(url=dg.EnvVar("WEBHOOK_URL").get_value()),
         },
     )

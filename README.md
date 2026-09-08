@@ -17,14 +17,16 @@ flow ready to be repurposed.
   with `load_from_defs_folder` auto-discovery
 - **QuestDB 10.0.1** as local Docker Compose infrastructure (no code needed
   to stand it up)
-- **Two configurable resources**:
+- **Three configurable resources**:
   - `WeatherApiResource` — Open-Meteo historical & forecast API client
   - `QuestDbResource` — QuestDB client with `ingest_dataframe()` for
     high-throughput DataFrame ingestion via the official Python client
+  - `WebhookResource` — external HTTP webhook notification dispatch (opt-in)
 - **Schema provisioning** — packaged DDL applied via `just db-init` (auto-run
   by `just dev`); idempotent `CREATE TABLE IF NOT EXISTS`
 - **Daily partitions** (UTC) on raw and rollup assets for backfillable, idempotent runs
-- **Automation conditions** + **sensor** for fully automated, scheduled execution
+- **Automation conditions** + **sensors** for fully automated, scheduled execution
+  and alert notification dispatch
 - **Env-driven configuration** — no secrets in code; everything is sourced
   from `.env`
 - **`just` task runner** — one command to boot the full dev environment
@@ -69,6 +71,10 @@ the rolling 24 h forecast window; `weather_forecast_alerts` fires
 eagerly after `weather_forecast` materializes. Each trigger
 materializes only the latest available partition — historical gaps
 require explicit backfill via the UI.
+
+A separate **`alert_notifier_sensor`** observes `weather_forecast_alerts`
+materializations and, when the status is `ALERTS_ACTIVE`, dispatches a
+structured `WeatherAlertPayload` to the configured `WEBHOOK_URL` (if set).
 
 | Port | Protocol | Purpose | Exposed by default |
 |------|----------|---------|--------------------|
@@ -165,6 +171,7 @@ All configuration is sourced from `.env` (auto-loaded by `just`):
 | `QDB_PG_READONLY_USER_ENABLED` | `true` | Provision a read-only PG user |
 | `QDB_PG_READONLY_USER` | `readonly` | Read-only user (analytics access) |
 | `QDB_PG_READONLY_PASSWORD` | `readonly` | Read-only password |
+| `WEBHOOK_URL` | *(empty)* | Optional target URL for alert webhook notifications; leave empty to disable |
 
 Defaults are local-dev only. Change all credentials before any non-local use.
 
@@ -185,11 +192,13 @@ Defaults are local-dev only. Change all credentials before any non-local use.
 │   │   │       └── daily_rollup.py     # weather_daily_rollup asset + integrity check
 │   │   ├── resources/
 │   │   │   ├── weather_api.py      # WeatherApiResource
-│   │   │   └── questdb.py          # QuestDbResource
+│   │   │   ├── questdb.py          # QuestDbResource
+│   │   │   └── webhook.py          # WebhookResource
 │   │   └── sensors/
-│   │       └── weather.py          # AutomationConditionSensor (weather group)
+│   │       └── weather.py          # AutomationConditionSensor + alert_notifier_sensor
 │   ├── models/
-│   │   └── weather.py              # WeatherMetric, WMO_BOUNDS, ROLLUP_PROJECTIONS, AlertRule, Pydantic models
+│   │   ├── weather.py              # WeatherMetric, WMO_BOUNDS, ROLLUP_PROJECTIONS, AlertRule, Pydantic models
+│   │   └── notification.py         # WeatherAlertPayload
 │   └── schema/
 │       ├── __main__.py             # CLI entrypoint (`python -m …schema`)
 │       └── ddl/
