@@ -55,7 +55,7 @@ class WeatherApiResource(dg.ConfigurableResource):
         params: dict[str, Any] = {
             "latitude": self.latitude,
             "longitude": self.longitude,
-            "forecast_days": 1,
+            "forecast_hours": 24,
             "hourly": ",".join(selected_metrics),
             "timezone": "GMT",
         }
