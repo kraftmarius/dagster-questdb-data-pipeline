@@ -1,9 +1,9 @@
 import dagster as dg
 
 from dagster_questdb_data_pipeline.defs.resources.webhook import WebhookResource
-from dagster_questdb_data_pipeline.models.notification import WeatherAlertPayload
 from dagster_questdb_data_pipeline.models.weather import (
     WEATHER_GROUP_NAME,
+    WeatherAlertPayload,
 )
 
 

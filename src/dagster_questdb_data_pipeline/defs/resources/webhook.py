@@ -2,7 +2,7 @@ import dagster as dg
 import httpx2
 from pydantic import Field
 
-from dagster_questdb_data_pipeline.models.notification import WeatherAlertPayload
+from dagster_questdb_data_pipeline.models.weather import WeatherAlertPayload
 
 
 class WebhookResource(dg.ConfigurableResource):

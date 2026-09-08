@@ -197,8 +197,13 @@ Defaults are local-dev only. Change all credentials before any non-local use.
 │   │   └── sensors/
 │   │       └── weather.py          # AutomationConditionSensor + alert_notifier_sensor
 │   ├── models/
-│   │   ├── weather.py              # WeatherMetric, WMO_BOUNDS, ROLLUP_PROJECTIONS, AlertRule, Pydantic models
-│   │   └── notification.py         # WeatherAlertPayload
+│   │   └── weather/
+│   │       ├── __init__.py         # Backward-compatible re-exports
+│   │       ├── constants.py        # Table names, group name, aliases
+│   │       ├── metrics.py          # WeatherMetric, MetricBound, WMO_BOUNDS
+│   │       ├── rollup.py           # RollupProjection, ROLLUP_PROJECTIONS
+│   │       ├── alerts.py           # AlertRule, ALERT_RULES, ActiveAlert, WeatherAlertPayload
+│   │       └── open_meteo.py       # HourlyWeatherData, OpenMeteoResponse
 │   └── schema/
 │       ├── __main__.py             # CLI entrypoint (`python -m …schema`)
 │       └── ddl/
