@@ -6,9 +6,10 @@ Time-series data pipeline template built with
 Out of the box it ingests hourly weather telemetry from the
 [Open-Meteo Archive API](https://open-meteo.com/en/docs/historical-weather-api)
 and [Forecast API](https://open-meteo.com/en/docs/forecast-api)
-into QuestDB and computes in-engine daily rollups — a complete
-**API → raw/forecast assets → rollup asset → time-series database** flow
-ready to be repurposed.
+into QuestDB, computes in-engine daily rollups, and evaluates predictive
+alert thresholds — a complete
+**API → raw/forecast assets → rollup + alert assets → time-series database**
+flow ready to be repurposed.
 
 ## What's inside
 
@@ -29,41 +30,45 @@ ready to be repurposed.
 - **`just` task runner** — one command to boot the full dev environment
 - **Typed API responses** — Pydantic models with WMO-based range validation
   (temperature, humidity, pressure, wind speed) fail fast on out-of-bounds data;
-  `AlertRule` domain model defines operational thresholds for predictive alerting
+  `WeatherMetric` StrEnum is the single source of truth for all metric column
+  names; `AlertRule` domain model with callable comparators drives the
+  `weather_forecast_alerts` asset for predictive alerting
 - **In-engine daily rollup** — `SAMPLE BY 1d ALIGN TO CALENDAR` aggregates
   24 hourly rows into daily statistics directly in QuestDB (no Python
   compute), driven by a typed `ROLLUP_PROJECTIONS` domain model
-- **Data integrity checks** — blocking `asset_check` on each asset verifies
-  row count, WMO metric bounds, and mathematical consistency (min ≤ avg ≤ max);
-  forecast check additionally validates 24 h horizon completeness
+- **Data integrity checks** — blocking `asset_check` on each storage asset
+  verifies row count, WMO metric bounds, and mathematical consistency
+  (min ≤ avg ≤ max); forecast check additionally validates 24 h horizon
+  completeness
 - **Quality gates**: `ruff` (lint + format), `ty` (type check), `dg check defs`
 
 ## Architecture
 
 ```
-┌──────────────────────┐      ┌───────────────────────────────┐      ┌──────────────────────────────┐      ┌────────────────┐
-│  Open-Meteo Archive  │ ───► │          weather_raw          │ ───► │      weather_daily_rollup    │ ───► │                │
-│   API (hourly data)  │      │  @dg.asset · daily partitions │      │  @dg.asset · in-engine SQL   │      │                │
-└──────────────────────┘      └───────────────────────────────┘      └──────────────────────────────┘      │     QuestDB    │
-                                                                                                           │  (REST :9000)  │
-┌──────────────────────┐      ┌───────────────────────────────┐                                            │                │
-│  Open-Meteo Forecast │ ───► │        weather_forecast       │ ─────────────────────────────────────────► │                │
-│   API (24h rolling)  │      │    @dg.asset · hourly cron    │                                            └────────────────┘
-└──────────────────────┘      └───────────────────────────────┘
+┌──────────────────────┐      ┌───────────────────────────────┐      ┌───────────────────────────────┐      ┌────────────────┐
+│  Open-Meteo Archive  │ ───► │          weather_raw          │ ───► │      weather_daily_rollup     │ ───► │                │
+│   API (hourly data)  │      │  @dg.asset · daily partitions │      │   @dg.asset · in-engine SQL   │      │                │
+└──────────────────────┘      └───────────────────────────────┘      └───────────────────────────────┘      │     QuestDB    │
+                                                                                                            │  (REST :9000)  │
+┌──────────────────────┐      ┌───────────────────────────────┐      ┌───────────────────────────────┐      │                │
+│  Open-Meteo Forecast │ ───► │        weather_forecast       │ ───► │    weather_forecast_alerts    │ ───► │                │
+│   API (24h rolling)  │      │    @dg.asset · hourly cron    │      │  @dg.asset · threshold eval   │      │                │
+└──────────────────────┘      └───────────────────────────────┘      └───────────────────────────────┘      └────────────────┘
 ```
 
-Both assets declare `kinds={"questdb", "sql"}` (rollup) or
-`kinds={"questdb"}` (raw), so the Dagster UI attributes compute
-to the time-series database rather than the Python worker.
+All storage assets declare `kinds={"questdb"}`, so the Dagster UI
+attributes compute to the time-series database rather than the Python
+worker.
 
 Execution is driven by **automation conditions** evaluated by an
 `AutomationConditionSensor` targeting the `weather` asset group:
 `weather_raw` fires on a daily 01:00 UTC cron; `weather_daily_rollup`
 fires eagerly as soon as `weather_raw` materializes for the same
 partition; `weather_forecast` fires hourly (`@hourly` cron), ingesting
-the rolling 24 h forecast window. Each trigger materializes only the
-latest available partition — historical gaps require explicit backfill
-via the UI.
+the rolling 24 h forecast window; `weather_forecast_alerts` fires
+eagerly after `weather_forecast` materializes. Each trigger
+materializes only the latest available partition — historical gaps
+require explicit backfill via the UI.
 
 | Port | Protocol | Purpose | Exposed by default |
 |------|----------|---------|--------------------|
@@ -114,10 +119,11 @@ containers on exit** (Ctrl-C). Data is not persisted across runs by design.
 The automation sensor is enabled by default — with `just dev` running,
 `weather_raw` will auto-materialize at 01:00 UTC daily and
 `weather_daily_rollup` will follow immediately after. `weather_forecast`
-materializes hourly via `@hourly` cron. You can also materialize manually:
-select an asset (`weather_raw`, `weather_forecast`, or
-`weather_daily_rollup`), pick a partition (if applicable), and
-materialize. Each asset has a blocking
+materializes hourly via `@hourly` cron, and `weather_forecast_alerts`
+evaluates thresholds on the next materialization. You can also materialize
+manually: select an asset (`weather_raw`, `weather_forecast`,
+`weather_forecast_alerts`, or `weather_daily_rollup`), pick a partition
+(if applicable), and materialize. Each storage asset has a blocking
 `integrity_check`: the raw check validates row count (24) and WMO metric
 bounds; the forecast check validates horizon completeness (≥24 rows) and
 WMO bounds; the rollup check validates mathematical consistency
@@ -175,7 +181,7 @@ Defaults are local-dev only. Change all credentials before any non-local use.
 │   │   ├── assets/
 │   │   │   └── weather/
 │   │   │       ├── raw.py              # weather_raw asset + integrity check
-│   │   │       ├── forecast.py         # weather_forecast asset + integrity check
+│   │   │       ├── forecast.py         # weather_forecast + weather_forecast_alerts + integrity check
 │   │   │       └── daily_rollup.py     # weather_daily_rollup asset + integrity check
 │   │   ├── resources/
 │   │   │   ├── weather_api.py      # WeatherApiResource
@@ -183,7 +189,7 @@ Defaults are local-dev only. Change all credentials before any non-local use.
 │   │   └── sensors/
 │   │       └── weather.py          # AutomationConditionSensor (weather group)
 │   ├── models/
-│   │   └── weather.py              # Pydantic models, WMO_BOUNDS, ROLLUP_PROJECTIONS, group/table constants
+│   │   └── weather.py              # WeatherMetric, WMO_BOUNDS, ROLLUP_PROJECTIONS, AlertRule, Pydantic models
 │   └── schema/
 │       ├── __main__.py             # CLI entrypoint (`python -m …schema`)
 │       └── ddl/
