@@ -255,7 +255,7 @@ cd <new_project_dir>
 # 2. Rename the package directory
 mv src/dagster_questdb_data_pipeline src/<new_module_name>
 
-# 3. Replace every name reference (a repo-wide search/replace of the two forms
+# 3. Replace every name reference (a repo-wide search/replace of the two forms)
 
 # 4. Regenerate the lockfile and venv — MUST run last, at the final path
 rm -rf .venv

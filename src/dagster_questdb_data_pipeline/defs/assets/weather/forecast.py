@@ -6,9 +6,11 @@ import pandas as pd
 from dagster_questdb_data_pipeline.defs.resources.questdb import QuestDbResource
 from dagster_questdb_data_pipeline.defs.resources.weather_api import WeatherApiResource
 from dagster_questdb_data_pipeline.models.weather import (
+    ALERT_RULES,
     WEATHER_FORECAST_TABLE,
     WEATHER_GROUP_NAME,
     WMO_BOUNDS,
+    ActiveAlert,
 )
 
 
@@ -108,4 +110,88 @@ def forecast_integrity_check(
     return dg.AssetCheckResult(
         passed=passed,
         metadata=metadata,
+    )
+
+
+@dg.asset(
+    name="weather_forecast_alerts",
+    description="Evaluates predictive alert thresholds on the upcoming forecast horizon.",
+    group_name=WEATHER_GROUP_NAME,
+    kinds={"questdb"},
+    deps={WEATHER_FORECAST_TABLE},
+    automation_condition=dg.AutomationCondition.eager(),
+)
+def forecast_alerts(
+    context: dg.AssetExecutionContext,
+    questdb: QuestDbResource,
+) -> dg.Output[None]:
+    # Dynamically select all metric columns defined in the domain model
+    metrics_projection = ",\n            ".join(WMO_BOUNDS.keys())
+
+    sql = f"""
+        SELECT
+            timestamp,
+            {metrics_projection}
+        FROM {WEATHER_FORECAST_TABLE}
+        WHERE timestamp >= now()
+        ORDER BY timestamp ASC;
+    """
+
+    with questdb.connect() as db, db.query(sql) as result:
+        df = result.to_pandas()
+
+    if df.empty:
+        context.log.info("No future forecast records found for alert evaluation.")
+
+        return dg.Output(
+            value=None,
+            metadata={
+                "active_alerts_count": dg.MetadataValue.int(0),
+                "status": dg.MetadataValue.text("NO_DATA"),
+            },
+        )
+
+    active_alerts: list[ActiveAlert] = []
+
+    for _, row in df.iterrows():
+        row_time = str(row["timestamp"])
+
+        for rule in ALERT_RULES:
+            actual_val = float(row[rule.metric])
+
+            if rule.is_active(actual_val):
+                alert_entry: ActiveAlert = {
+                    "timestamp": row_time,
+                    "metric": rule.metric,
+                    "actual_value": actual_val,
+                    "threshold": rule.threshold,
+                    "unit": rule.unit,
+                    "severity": rule.severity,
+                    "description": rule.description,
+                }
+                active_alerts.append(alert_entry)
+
+                if rule.severity == "critical":
+                    context.log.error(
+                        f"CRITICAL ALERT at {row_time}: {rule.description} (Actual: {actual_val} {rule.unit})"
+                    )
+                else:
+                    context.log.warning(
+                        f"WARNING ALERT at {row_time}: {rule.description} (Actual: {actual_val} {rule.unit})"
+                    )
+
+    alerts_count = len(active_alerts)
+    status = "ALERTS_ACTIVE" if alerts_count > 0 else "NOMINAL"
+
+    return dg.Output(
+        value=None,
+        metadata={
+            "status": dg.MetadataValue.text(status),
+            "active_alerts_count": dg.MetadataValue.int(alerts_count),
+            "active_alerts": (
+                dg.MetadataValue.json(active_alerts)
+                if active_alerts
+                else dg.MetadataValue.text("None")
+            ),
+        },
     )

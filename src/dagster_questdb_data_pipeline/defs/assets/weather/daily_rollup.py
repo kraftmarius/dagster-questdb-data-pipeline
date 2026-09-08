@@ -2,11 +2,13 @@ import dagster as dg
 
 from dagster_questdb_data_pipeline.defs.resources.questdb import QuestDbResource
 from dagster_questdb_data_pipeline.models.weather import (
+    DIURNAL_RANGE_ALIAS,
     ROLLUP_PROJECTIONS,
     WEATHER_DAILY_ROLLUP_TABLE,
     WEATHER_GROUP_NAME,
     WEATHER_RAW_TABLE,
     WMO_BOUNDS,
+    WeatherMetric,
 )
 
 
@@ -14,7 +16,7 @@ from dagster_questdb_data_pipeline.models.weather import (
     name=WEATHER_DAILY_ROLLUP_TABLE,
     description="Computes in-engine daily downsampled weather statistics from raw telemetry.",
     group_name=WEATHER_GROUP_NAME,
-    kinds={"questdb", "sql"},
+    kinds={"questdb"},
     deps={WEATHER_RAW_TABLE},
     partitions_def=dg.DailyPartitionsDefinition(start_date="2026-01-01", timezone="UTC"),
     automation_condition=dg.AutomationCondition.eager(),
@@ -103,11 +105,11 @@ def daily_rollup_integrity_check(
     if row_count != 1:
         violations.append(f"Incomplete rollup: expected 1 row, got {row_count}.")
 
-    t_min = float(row["min_temperature_2m"])
-    t_avg = float(row["avg_temperature_2m"])
-    t_max = float(row["max_temperature_2m"])
-    d_range = float(row["diurnal_temperature_range"])
-    avg_hum = float(row["avg_relative_humidity_2m"])
+    t_min = float(row[f"min_{WeatherMetric.TEMPERATURE_2M}"])
+    t_avg = float(row[f"avg_{WeatherMetric.TEMPERATURE_2M}"])
+    t_max = float(row[f"max_{WeatherMetric.TEMPERATURE_2M}"])
+    d_range = float(row[DIURNAL_RANGE_ALIAS])
+    avg_hum = float(row[f"avg_{WeatherMetric.RELATIVE_HUMIDITY_2M}"])
 
     if not (t_min <= t_avg <= t_max):
         violations.append(
@@ -124,17 +126,17 @@ def daily_rollup_integrity_check(
         val = float(row[proj.alias])
         metadata[proj.alias] = dg.MetadataValue.text(f"{val:.2f} {proj.unit}")
 
-    temp_bound = WMO_BOUNDS["temperature_2m"]
+    temp_bound = WMO_BOUNDS[WeatherMetric.TEMPERATURE_2M]
     if not (temp_bound.min_value <= t_min and t_max <= temp_bound.max_value):
         violations.append(
-            f"Daily temperature extremes exceed WMO bounds [{temp_bound.min_value}, {temp_bound.max_value}] °C: "
+            f"Daily temperature extremes exceed WMO bounds [{temp_bound.min_value}, {temp_bound.max_value}] {temp_bound.unit}: "
             f"[{t_min:.1f}, {t_max:.1f}]"
         )
 
-    hum_bound = WMO_BOUNDS["relative_humidity_2m"]
+    hum_bound = WMO_BOUNDS[WeatherMetric.RELATIVE_HUMIDITY_2M]
     if not (hum_bound.min_value <= avg_hum <= hum_bound.max_value):
         violations.append(
-            f"Average humidity exceeds WMO bounds [{hum_bound.min_value}, {hum_bound.max_value}] %: {avg_hum:.1f}"
+            f"Average humidity exceeds WMO bounds [{hum_bound.min_value}, {hum_bound.max_value}] {hum_bound.unit}: {avg_hum:.1f}"
         )
 
     passed = len(violations) == 0
