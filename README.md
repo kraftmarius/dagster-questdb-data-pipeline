@@ -5,7 +5,7 @@ Time-series data pipeline template built with
 
 Out of the box it ingests hourly weather telemetry from the
 [Open-Meteo Archive API](https://open-meteo.com/en/docs/historical-weather-api)
-and [Forecast API](https://open-meteo.com/en/docs/forecast-api)
+and [Forecast API](https://open-meteo.com/en/docs)
 into QuestDB, computes in-engine daily rollups, and evaluates predictive
 alert thresholds — a complete
 **API → raw/forecast assets → rollup + alert assets → time-series database**
