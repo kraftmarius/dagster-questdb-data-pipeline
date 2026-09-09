@@ -5,7 +5,7 @@ services:
   questdb:
     image: questdb/questdb:10.0.1
     container_name: ${COMPOSE_PROJECT_NAME}_questdb
-    restart: no
+    restart: "no"
     environment:
       - QDB_TELEMETRY_ENABLED
       - QDB_PG_USER
@@ -25,15 +25,12 @@ services:
           "CMD-SHELL",
           "curl -v http://127.0.0.1:9003",
         ]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 5s
+      interval: 1s
+      timeout: 2s
+      retries: 5
+      start_period: 1s
     logging:
-      driver: "local"
-      options:
-        max-size: "100m"
-        max-file: "3"
+      driver: "journald"
 
 volumes:
   questdb_data:

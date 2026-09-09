@@ -5,9 +5,11 @@ Time-series data pipeline template built with
 
 Out of the box it ingests hourly weather telemetry from the
 [Open-Meteo Archive API](https://open-meteo.com/en/docs/historical-weather-api)
-into QuestDB and computes in-engine daily rollups — a complete
-**API → raw asset → rollup asset → time-series database** flow ready
-to be repurposed.
+and [Forecast API](https://open-meteo.com/en/docs)
+into QuestDB, computes in-engine daily rollups, and evaluates predictive
+alert thresholds — a complete
+**API → raw/forecast assets → rollup + alert assets → time-series database**
+flow ready to be repurposed.
 
 ## What's inside
 
@@ -15,45 +17,64 @@ to be repurposed.
   with `load_from_defs_folder` auto-discovery
 - **QuestDB 10.0.1** as local Docker Compose infrastructure (no code needed
   to stand it up)
-- **Two configurable resources**:
-  - `WeatherApiResource` — Open-Meteo historical API client
+- **Three configurable resources**:
+  - `WeatherApiResource` — Open-Meteo historical & forecast API client
   - `QuestDbResource` — QuestDB client with `ingest_dataframe()` for
     high-throughput DataFrame ingestion via the official Python client
+  - `WebhookResource` — external HTTP webhook notification dispatch (opt-in)
 - **Schema provisioning** — packaged DDL applied via `just db-init` (auto-run
   by `just dev`); idempotent `CREATE TABLE IF NOT EXISTS`
-- **Daily partitions** (UTC) on all assets for backfillable, idempotent runs
-- **Automation conditions** + **sensor** for fully automated, scheduled execution
+- **Daily partitions** (UTC) on raw and rollup assets for backfillable, idempotent runs
+- **Automation conditions** + **sensors** for fully automated, scheduled execution
+  and alert notification dispatch
 - **Env-driven configuration** — no secrets in code; everything is sourced
   from `.env`
 - **`just` task runner** — one command to boot the full dev environment
 - **Typed API responses** — Pydantic models with WMO-based range validation
-  (temperature, humidity, pressure, wind speed) fail fast on out-of-bounds data
+  (temperature, humidity, pressure, wind speed) fail fast on out-of-bounds data;
+  `WeatherMetric` StrEnum is the single source of truth for all metric column
+  names; `AlertRule` domain model with callable comparators drives the
+  `weather_forecast_alerts` asset for predictive alerting
 - **In-engine daily rollup** — `SAMPLE BY 1d ALIGN TO CALENDAR` aggregates
   24 hourly rows into daily statistics directly in QuestDB (no Python
   compute), driven by a typed `ROLLUP_PROJECTIONS` domain model
-- **Data integrity checks** — blocking `asset_check` on each asset verifies
-  row count, metric bounds, and mathematical consistency (min ≤ avg ≤ max)
+- **Data integrity checks** — blocking `asset_check` on each storage asset
+  verifies row count, WMO metric bounds, and mathematical consistency
+  (min ≤ avg ≤ max); forecast check additionally validates 24 h horizon
+  completeness
 - **Quality gates**: `ruff` (lint + format), `ty` (type check), `dg check defs`
 
 ## Architecture
 
 ```
-┌──────────────────────┐      ┌───────────────────────────────┐      ┌──────────────────────────────┐      ┌────────────────┐
-│  Open-Meteo Archive  │ ───► │          weather_raw          │ ───► │      weather_daily_rollup    │ ───► │     QuestDB    │
-│   API (hourly data)  │      │  @dg.asset · daily partitions │      │  @dg.asset · in-engine SQL   │      │  (REST :9000)  │
-└──────────────────────┘      └───────────────────────────────┘      └──────────────────────────────┘      └────────────────┘
+┌──────────────────────┐      ┌───────────────────────────────┐      ┌───────────────────────────────┐      ┌────────────────┐
+│  Open-Meteo Archive  │ ───► │          weather_raw          │ ───► │      weather_daily_rollup     │ ───► │                │
+│   API (hourly data)  │      │  @dg.asset · daily partitions │      │   @dg.asset · in-engine SQL   │      │                │
+└──────────────────────┘      └───────────────────────────────┘      └───────────────────────────────┘      │     QuestDB    │
+                                                                                                            │  (REST :9000)  │
+┌──────────────────────┐      ┌───────────────────────────────┐      ┌───────────────────────────────┐      │                │
+│  Open-Meteo Forecast │ ───► │        weather_forecast       │ ───► │    weather_forecast_alerts    │ ───► │                │
+│   API (24h rolling)  │      │    @dg.asset · hourly cron    │      │  @dg.asset · threshold eval   │      │                │
+└──────────────────────┘      └───────────────────────────────┘      └───────────────────────────────┘      └────────────────┘
 ```
 
-Both assets declare `kinds={"questdb", "sql"}` (rollup) or
-`kinds={"questdb"}` (raw), so the Dagster UI attributes compute
-to the time-series database rather than the Python worker.
+All storage assets declare `kinds={"questdb"}`, so the Dagster UI
+attributes compute to the time-series database rather than the Python
+worker.
 
 Execution is driven by **automation conditions** evaluated by an
 `AutomationConditionSensor` targeting the `weather` asset group:
 `weather_raw` fires on a daily 01:00 UTC cron; `weather_daily_rollup`
 fires eagerly as soon as `weather_raw` materializes for the same
-partition. Each trigger materializes only the latest available
-partition — historical gaps require explicit backfill via the UI.
+partition; `weather_forecast` fires hourly (`@hourly` cron), ingesting
+the rolling 24 h forecast window; `weather_forecast_alerts` fires
+eagerly after `weather_forecast` materializes. Each trigger
+materializes only the latest available partition — historical gaps
+require explicit backfill via the UI.
+
+A separate **`alert_notifier_sensor`** observes `weather_forecast_alerts`
+materializations and, when the status is `ALERTS_ACTIVE`, dispatches a
+structured `WeatherAlertPayload` to the configured `WEBHOOK_URL` (if set).
 
 | Port | Protocol | Purpose | Exposed by default |
 |------|----------|---------|--------------------|
@@ -103,18 +124,22 @@ containers on exit** (Ctrl-C). Data is not persisted across runs by design.
 
 The automation sensor is enabled by default — with `just dev` running,
 `weather_raw` will auto-materialize at 01:00 UTC daily and
-`weather_daily_rollup` will follow immediately after. You can also
-materialize manually: select an asset (`weather_raw` or
-`weather_daily_rollup`), pick a partition, and materialize. Each asset
-has a blocking
+`weather_daily_rollup` will follow immediately after. `weather_forecast`
+materializes hourly via `@hourly` cron, and `weather_forecast_alerts`
+evaluates thresholds on the next materialization. You can also materialize
+manually: select an asset (`weather_raw`, `weather_forecast`,
+`weather_forecast_alerts`, or `weather_daily_rollup`), pick a partition
+(if applicable), and materialize. Each storage asset has a blocking
 `integrity_check`: the raw check validates row count (24) and WMO metric
-bounds; the rollup check validates mathematical consistency
+bounds; the forecast check validates horizon completeness (≥24 rows) and
+WMO bounds; the rollup check validates mathematical consistency
 (min ≤ avg ≤ max, diurnal range) and WMO bounds. Verify the tables via
 the QuestDB console:
 
 ```sql
 SELECT * FROM weather_raw ORDER BY timestamp DESC LIMIT 42;
-SELECT * FROM weather_daily_rollup ORDER BY timestamp DESC LIMIT 30;
+SELECT * FROM weather_forecast ORDER BY timestamp DESC LIMIT 42;
+SELECT * FROM weather_daily_rollup ORDER BY timestamp DESC LIMIT 42;
 ```
 
 ### WMO Validation Thresholds
@@ -146,6 +171,7 @@ All configuration is sourced from `.env` (auto-loaded by `just`):
 | `QDB_PG_READONLY_USER_ENABLED` | `true` | Provision a read-only PG user |
 | `QDB_PG_READONLY_USER` | `readonly` | Read-only user (analytics access) |
 | `QDB_PG_READONLY_PASSWORD` | `readonly` | Read-only password |
+| `WEBHOOK_URL` | *(empty)* | Optional target URL for alert webhook notifications; leave empty to disable |
 
 Defaults are local-dev only. Change all credentials before any non-local use.
 
@@ -162,18 +188,27 @@ Defaults are local-dev only. Change all credentials before any non-local use.
 │   │   ├── assets/
 │   │   │   └── weather/
 │   │   │       ├── raw.py              # weather_raw asset + integrity check
+│   │   │       ├── forecast.py         # weather_forecast + weather_forecast_alerts + integrity check
 │   │   │       └── daily_rollup.py     # weather_daily_rollup asset + integrity check
 │   │   ├── resources/
 │   │   │   ├── weather_api.py      # WeatherApiResource
-│   │   │   └── questdb.py          # QuestDbResource
+│   │   │   ├── questdb.py          # QuestDbResource
+│   │   │   └── webhook.py          # WebhookResource
 │   │   └── sensors/
-│   │       └── weather.py          # AutomationConditionSensor (weather group)
+│   │       └── weather.py          # AutomationConditionSensor + alert_notifier_sensor
 │   ├── models/
-│   │   └── weather.py              # Pydantic models, WMO_BOUNDS, ROLLUP_PROJECTIONS, group/table constants
+│   │   └── weather/
+│   │       ├── __init__.py         # Backward-compatible re-exports
+│   │       ├── constants.py        # Table names, group name, aliases
+│   │       ├── metrics.py          # WeatherMetric, MetricBound, WMO_BOUNDS
+│   │       ├── rollup.py           # RollupProjection, ROLLUP_PROJECTIONS
+│   │       ├── alerts.py           # AlertRule, ALERT_RULES, ActiveAlert, WeatherAlertPayload
+│   │       └── open_meteo.py       # HourlyWeatherData, OpenMeteoResponse
 │   └── schema/
 │       ├── __main__.py             # CLI entrypoint (`python -m …schema`)
 │       └── ddl/
 │           ├── weather_raw.sql             # QuestDB DDL (hourly, partitioned, WAL, dedup)
+│           ├── weather_forecast.sql        # QuestDB DDL (hourly, partitioned, WAL, dedup)
 │           └── weather_daily_rollup.sql    # QuestDB DDL (daily, partitioned, WAL, dedup)
 ├── tests/
 ├── justfile
@@ -240,7 +275,7 @@ cd <new_project_dir>
 # 2. Rename the package directory
 mv src/dagster_questdb_data_pipeline src/<new_module_name>
 
-# 3. Replace every name reference (a repo-wide search/replace of the two forms
+# 3. Replace every name reference (a repo-wide search/replace of the two forms)
 
 # 4. Regenerate the lockfile and venv — MUST run last, at the final path
 rm -rf .venv

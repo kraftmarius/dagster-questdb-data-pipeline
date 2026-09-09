@@ -1,52 +1,11 @@
-from dataclasses import dataclass
-from typing import Final, Self
+"""Open-Meteo API response models."""
+
+from typing import Self
 
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-WEATHER_GROUP_NAME: Final[str] = "weather"
-WEATHER_RAW_TABLE: Final[str] = "weather_raw"
-WEATHER_DAILY_ROLLUP_TABLE: Final[str] = "weather_daily_rollup"
-
-
-@dataclass(frozen=True)
-class MetricBound:
-    """Physically plausible range for a weather metric, derived from WMO world records."""
-
-    min_value: float
-    max_value: float
-    unit: str
-
-
-# WMO-derived validation thresholds (single source of truth).
-WMO_BOUNDS = {
-    "temperature_2m": MetricBound(min_value=-95.0, max_value=65.0, unit="°C"),
-    "relative_humidity_2m": MetricBound(min_value=0.0, max_value=100.0, unit="%"),
-    "pressure_msl": MetricBound(min_value=850.0, max_value=1100.0, unit="hPa"),
-    "wind_speed_10m": MetricBound(min_value=0.0, max_value=500.0, unit="km/h"),
-}
-
-
-@dataclass(frozen=True)
-class RollupProjection:
-    """Specification of an in-engine SQL rollup projection."""
-
-    expression: str
-    alias: str
-    unit: str
-
-
-ROLLUP_PROJECTIONS: Final[tuple[RollupProjection, ...]] = (
-    RollupProjection("avg(temperature_2m)", "avg_temperature_2m", "°C"),
-    RollupProjection("min(temperature_2m)", "min_temperature_2m", "°C"),
-    RollupProjection("max(temperature_2m)", "max_temperature_2m", "°C"),
-    RollupProjection(
-        "(max(temperature_2m) - min(temperature_2m))", "diurnal_temperature_range", "°C"
-    ),
-    RollupProjection("avg(relative_humidity_2m)", "avg_relative_humidity_2m", "%"),
-    RollupProjection("avg(pressure_msl)", "avg_pressure_msl", "hPa"),
-    RollupProjection("max(wind_speed_10m)", "max_wind_speed_10m", "km/h"),
-)
+from dagster_questdb_data_pipeline.models.weather.metrics import WMO_BOUNDS, WeatherMetric
 
 
 class HourlyWeatherData(BaseModel):
@@ -60,9 +19,9 @@ class HourlyWeatherData(BaseModel):
 
     @classmethod
     def metric_names(cls) -> list[str]:
-        """Return all weather metric column names excluding timestamp."""
+        """Return all weather metric column names strictly driven by WeatherMetric SSOT."""
 
-        return [field for field in cls.model_fields if field != "time"]
+        return [metric.value for metric in WeatherMetric]
 
     @model_validator(mode="after")
     def validate_column_lengths_and_ranges(self) -> Self:
@@ -110,3 +69,9 @@ class OpenMeteoResponse(BaseModel):
     timezone_abbreviation: str
     elevation: float
     hourly: HourlyWeatherData
+
+
+# Sanity check: Pydantic fields in HourlyWeatherData do not match WeatherMetric Enum!
+assert set(HourlyWeatherData.metric_names()) == {
+    f for f in HourlyWeatherData.model_fields if f != "time"
+}, "Schema Drift: Pydantic fields in HourlyWeatherData do not match WeatherMetric Enum!"

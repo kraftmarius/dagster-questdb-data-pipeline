@@ -26,7 +26,7 @@ dev:
     trap cleanup EXIT SIGINT SIGTERM
 
     echo "=== Starting infrastructure... ==="
-    just infra up --wait
+    just infra up -d --wait
     just db-init
 
     echo "=== Starting Dagster dev server... ==="

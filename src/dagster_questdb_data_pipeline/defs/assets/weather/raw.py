@@ -24,7 +24,7 @@ def raw(
 ) -> dg.Output[None]:
     target_date = context.partition_time_window.start.date()
 
-    response = weather_api.fetch_hourly(start_date=target_date, end_date=target_date)
+    response = weather_api.fetch_historical_hourly(start_date=target_date, end_date=target_date)
     df = response.hourly.to_dataframe()
 
     row_count = questdb.ingest_dataframe(WEATHER_RAW_TABLE, df)
